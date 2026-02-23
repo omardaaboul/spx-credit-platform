@@ -43,13 +43,13 @@ export type DataContractResult = {
 };
 
 const FEED_SPECS: Record<DataKey, FeedSpec> = {
-  underlying_price: { label: "SPX underlying", maxAgeMs: 2_000 },
-  option_chain: { label: "Option chain", maxAgeMs: 5_000 },
-  greeks: { label: "Greeks", maxAgeMs: 5_000 },
-  intraday_candles: { label: "Intraday candles", maxAgeMs: 15_000 },
-  vwap: { label: "VWAP", maxAgeMs: 15_000 },
-  atr_1m_5: { label: "ATR(1m,5)", maxAgeMs: 15_000 },
-  realized_range_15m: { label: "15m realized range", maxAgeMs: 60_000 },
+  underlying_price: { label: "SPX underlying", maxAgeMs: 15_000 },
+  option_chain: { label: "Option chain", maxAgeMs: 20_000 },
+  greeks: { label: "Greeks", maxAgeMs: 20_000 },
+  intraday_candles: { label: "Intraday candles", maxAgeMs: 90_000 },
+  vwap: { label: "VWAP", maxAgeMs: 90_000 },
+  atr_1m_5: { label: "ATR(1m,5)", maxAgeMs: 90_000 },
+  realized_range_15m: { label: "15m realized range", maxAgeMs: 180_000 },
   expected_move: { label: "Expected move (EM/EMR)", maxAgeMs: 300_000 },
   regime: { label: "Regime classification", maxAgeMs: 30_000 },
 };
