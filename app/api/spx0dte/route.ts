@@ -56,7 +56,9 @@ const EVALUATION_STATE_PATH = path.join(process.cwd(), "storage", ".evaluation_s
 const DEBUG_MODE = String(process.env.SPX0DTE_DEBUG || "false").toLowerCase() === "true";
 const SIMULATION_MODE = simulationModeEnabled();
 const ALLOW_SIM_ALERTS = allowSimAlertsEnabled();
-const STRICT_LIVE_BLOCKS = String(process.env.STRICT_LIVE_BLOCKS ?? "true").toLowerCase() !== "false";
+const STRICT_LIVE_BLOCKS = String(process.env.STRICT_LIVE_BLOCKS ?? "false").toLowerCase() !== "false";
+const ENABLE_SYSTEM_HEALTH_ALERTS =
+  String(process.env.SPX0DTE_ENABLE_SYSTEM_HEALTH_ALERTS ?? "false").toLowerCase() !== "false";
 const FEATURE_0DTE = feature0dteEnabled();
 
 type TelegramDedupeState = {
@@ -2368,7 +2370,7 @@ function applyDataContract(payload: DashboardPayload): DashboardPayload {
     rows: Array<{ name: string; status: "pass" | "fail" | "blocked" | "na"; detail?: string; required?: boolean }>,
     section: "global" | "regime" | "strategy",
     strategy?: Strategy,
-  ) => applyDataContractToRows(rows, section, strategy, contract);
+  ) => applyDataContractToRows(rows, section, strategy, contract, { strictLiveBlocks: STRICT_LIVE_BLOCKS });
 
   let next: DashboardPayload = {
     ...payload,
@@ -3081,7 +3083,9 @@ function buildPreflight(payload: DashboardPayload): DashboardPayload["preflight"
   const anyReady = payload.candidates.some((candidate) => candidate.ready);
   const dataFreshPass = payload.staleData ? !payload.staleData.active : false;
   const contractHealthy =
-    payload.dataContract?.status === "healthy" || (!payload.market.isOpen && payload.dataContract?.status === "inactive");
+    payload.dataContract?.status === "healthy" ||
+    (!payload.market.isOpen && payload.dataContract?.status === "inactive") ||
+    (!STRICT_LIVE_BLOCKS && payload.dataContract?.status === "degraded");
 
   const checks = [
     check("Market open", payload.market.isOpen ? "pass" : "fail", payload.market.isOpen ? "Session active." : "Market closed."),
@@ -4550,6 +4554,16 @@ function parseIsoMs(value?: string): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+function normalizeSystemIssueKey(text: string): string {
+  return String(text ?? "")
+    .trim()
+    .replace(/\(\s*\d+ms\s*>\s*\d+ms\s*\)/gi, "(stale)")
+    .replace(/age=\s*\d+ms/gi, "age=n/a")
+    .replace(/\b\d+ms\b/gi, "Xms")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 async function maybeSendSystemHealthAlert(payload: DashboardPayload, enabled: boolean): Promise<void> {
   if (!enabled) return;
   const stale = payload.staleData ?? { active: false, detail: "" };
@@ -4564,20 +4578,24 @@ async function maybeSendSystemHealthAlert(payload: DashboardPayload, enabled: bo
   const prevMs = parseIsoMs(state.lastStaleSentAtIso);
   const inCooldown = prevMs != null && nowMs - prevMs < cooldownSec * 1000;
   const detail = String(stale.detail ?? "").trim();
-  const detailChanged = detail !== String(state.lastStaleDetail ?? "");
+  const detailKey = normalizeSystemIssueKey(detail);
+  const detailChanged = detailKey !== String(state.lastStaleDetail ?? "");
 
   if (stale.active && (!inCooldown || detailChanged || state.staleActivePreviously === false)) {
+    const staleAction = STRICT_LIVE_BLOCKS
+      ? "Action: Entry alerts blocked until live/fresh data resumes."
+      : "Action: Warning only (STRICT_LIVE_BLOCKS=false). Triggers remain enabled.";
     const lines = [
       "⚠️ SPX0DTE DATA LATENCY ALERT",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
       `Source: ${payload.market.source}`,
       `Reason: ${detail || "Data stale"}`,
-      "Action: Entry alerts blocked until live/fresh data resumes.",
+      staleAction,
     ];
     const sent = await sendTelegramMessage(lines.join("\n"));
     if (sent.ok) {
       state.lastStaleSentAtIso = nowIso;
-      state.lastStaleDetail = detail;
+      state.lastStaleDetail = detailKey;
       state.staleActivePreviously = true;
       saveSystemAlertState(state);
     }
@@ -4585,11 +4603,14 @@ async function maybeSendSystemHealthAlert(payload: DashboardPayload, enabled: bo
   }
 
   if (!stale.active && state.staleActivePreviously) {
+    const staleClearedText = STRICT_LIVE_BLOCKS
+      ? "Data freshness restored. Entry checks re-enabled."
+      : "Data freshness restored. Warning state cleared.";
     const lines = [
       "✅ SPX0DTE DATA RECOVERY",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
       `Source: ${payload.market.source}`,
-      "Data freshness restored. Entry checks re-enabled.",
+      staleClearedText,
     ];
     const sent = await sendTelegramMessage(lines.join("\n"));
     if (sent.ok) {
@@ -4604,22 +4625,26 @@ async function maybeSendSystemHealthAlert(payload: DashboardPayload, enabled: bo
   state.staleActivePreviously = stale.active;
 
   const degradedIssue = degraded ? String(contract?.issues?.[0] ?? "Data contract degraded.") : "";
-  const degradedIssueChanged = degradedIssue !== String(state.lastDegradedIssueKey ?? "");
+  const degradedIssueKey = normalizeSystemIssueKey(degradedIssue);
+  const degradedIssueChanged = degradedIssueKey !== String(state.lastDegradedIssueKey ?? "");
   const prevDegradedMs = parseIsoMs(state.lastDegradedSentAtIso);
   const degradedInCooldown = prevDegradedMs != null && nowMs - prevDegradedMs < cooldownSec * 1000;
 
   if (degraded && (!degradedInCooldown || degradedIssueChanged || state.degradedActivePreviously === false)) {
+    const degradedAction = STRICT_LIVE_BLOCKS
+      ? "Action: Triggers paused until required feeds are fresh."
+      : "Action: Warning only (STRICT_LIVE_BLOCKS=false). Triggers remain enabled.";
     const lines = [
       "⚠️ SPX0DTE DEGRADED MODE",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
       `Source: ${payload.market.source}`,
       `Issue: ${degradedIssue}`,
-      "Action: Triggers paused until required feeds are fresh.",
+      degradedAction,
     ];
     const sent = await sendTelegramMessage(lines.join("\n"));
     if (sent.ok) {
       state.lastDegradedSentAtIso = nowIso;
-      state.lastDegradedIssueKey = degradedIssue;
+      state.lastDegradedIssueKey = degradedIssueKey;
       state.degradedActivePreviously = true;
       saveSystemAlertState(state);
     }
@@ -4627,10 +4652,13 @@ async function maybeSendSystemHealthAlert(payload: DashboardPayload, enabled: bo
   }
 
   if (!degraded && state.degradedActivePreviously) {
+    const clearedText = STRICT_LIVE_BLOCKS
+      ? "Data contract healthy. Triggers resumed."
+      : "Data contract healthy. Warning state cleared.";
     const lines = [
       "✅ SPX0DTE DEGRADED MODE CLEARED",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
-      "Data contract healthy. Triggers resumed.",
+      clearedText,
     ];
     const sent = await sendTelegramMessage(lines.join("\n"));
     if (sent.ok) {
@@ -4932,7 +4960,7 @@ export async function GET(request: Request) {
   savePreflight(payload.preflight);
   appendSnapshotLog(payload);
   const canSendOperationalAlerts = telegramEnabled && (marketOpen || (marketClosedOverride && ALLOW_SIM_ALERTS));
-  await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts);
+  await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts && ENABLE_SYSTEM_HEALTH_ALERTS);
   await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts);
   await maybeSendMacroBlockAlert(payload, canSendOperationalAlerts);
 
