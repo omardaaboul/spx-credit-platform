@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum SetupType {
+  debit
+  credit
+  long_option
+  other
+}
+
+enum TradeDirection {
+  bullish
+  bearish
+  neutral
+}
+
+enum TradeStatus {
+  planned
+  entered
+  closed
+  canceled
+}
+
+enum IVContext {
+  low
+  medium
+  high
+  unknown
+}
+
+enum ExitReason {
+  target_hit
+  stop_hit
+  time_stop
+  discretionary
+  assignment
+  other
+}
+
+enum EmotionalState {
+  calm
+  anxious
+  angry
+  tired
+  distracted
+  FOMO
+  revenge
+  other
+}
+
+model Setup {
+  id                   String     @id @default(cuid())
+  name                 String
+  type                 SetupType
+  description          String
+  entryCriteria        String
+  exitCriteria         String
+  bestMarketConditions String
+  active               Boolean    @default(false)
+  createdAt            DateTime   @default(now())
+
+  trades               Trade[]
+}
+
+model Trade {
+  id                    String         @id @default(cuid())
+  setupId               String?
+  setup                 Setup?         @relation(fields: [setupId], references: [id])
+  symbol                String
+  direction             TradeDirection
+  strategyDetails       String
+  plannedEntryDate      DateTime
+  enteredAt             DateTime?
+  closedAt              DateTime?
+  status                TradeStatus
+
+  accountValueAtEntry   Float?
+  maxRiskAmount         Float
+  maxRiskPercent        Float
+  positionSizeContracts Int?
+
+  thesis                String
+  catalystsOrContext    String
+  ivContext             IVContext
+  invalidationLevel     String
+  takeProfitPlan        String
+  stopLossPlan          String
+  timeStopPlan          String
+  confidenceScore       Int
+  checklistCompleted    Boolean
+
+  exitReason            ExitReason?
+  pnlAmount             Float?
+  pnlPercent            Float?
+  notes                 String?
+  emotionalState        EmotionalState?
+  followedPlan          Boolean?
+  mistakes              String?
+  lessons               String?
+
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([status])
+  @@index([plannedEntryDate])
+  @@index([enteredAt])
+  @@index([closedAt])
+}
+
+model Rule {
+  id                          String   @id @default(cuid())
+  name                        String
+  riskPerTradePercentDefault  Float
+  maxDailyLossPercent         Float
+  maxTradesPerDay             Int
+  requireChecklistBeforeEntry Boolean
+  requireMaxLossDefined       Boolean
+  createdAt                   DateTime @default(now())
+}
+
+model Journal {
+  id             String         @id @default(cuid())
+  date           DateTime
+  preMarketNotes String?
+  postMarketNotes String?
+  mood           EmotionalState?
+  adherenceScore Int?
+  createdAt      DateTime @default(now())
+}

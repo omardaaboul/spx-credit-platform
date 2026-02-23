@@ -1,0 +1,18 @@
+{
+  "cooldownSecondsByStrategy": {
+    "Iron Condor": 300,
+    "Iron Fly": 300,
+    "Directional Spread": 300,
+    "Convex Debit Spread": 180,
+    "2-DTE Credit Spread": 900,
+    "Broken-Wing Put Butterfly": 1800
+  },
+  "maxAlertsPerDayByStrategy": {
+    "Iron Condor": 8,
+    "Iron Fly": 8,
+    "Directional Spread": 8,
+    "Convex Debit Spread": 10,
+    "2-DTE Credit Spread": 4,
+    "Broken-Wing Put Butterfly": 3
+  }
+}

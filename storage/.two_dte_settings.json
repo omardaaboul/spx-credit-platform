@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "width": 10,
+  "short_delta_min": 0.1,
+  "short_delta_max": 0.2,
+  "auto_select_params": true,
+  "min_strike_distance": 30,
+  "max_strike_distance": 50,
+  "min_credit": 0.8,
+  "max_credit": 1,
+  "use_delta_stop": true,
+  "delta_stop": 0.4,
+  "stop_multiple": 3,
+  "profit_take_debit": 0.05,
+  "require_measured_move": false,
+  "allow_catalyst": false
+}

@@ -1,0 +1,13 @@
+{
+  "updatedAtIso": "2026-02-22T15:00:00.000Z",
+  "generatedAtEt": "10:00:00",
+  "source": "market-closed-snapshot-log",
+  "spot": 6000,
+  "priceSeries": [
+    {
+      "t": "09:55:00",
+      "price": 6000,
+      "vwap": 5998
+    }
+  ]
+}

@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+  --spx-bg: #f3f5f8;
+  --spx-surface: #ffffff;
+  --spx-panel: #f7f9fc;
+  --spx-border: #d9e0ea;
+  --spx-muted: #5c6b7d;
+  --spx-text: #122035;
+  --spx-accent: #2b6ef2;
+  --spx-grid: #dfe5ee;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #ffffff;
+    --foreground: #000000;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Inter, "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.spx-shell {
+  background: var(--spx-bg);
+  color: var(--spx-text);
+}
+
+.spx-shell[data-theme="dark"] {
+  --spx-bg: #0f1724;
+  --spx-surface: #111b2b;
+  --spx-panel: #172236;
+  --spx-border: #263349;
+  --spx-muted: #9fb0c6;
+  --spx-text: #e7edf6;
+  --spx-accent: #63a1ff;
+  --spx-grid: #2b3850;
+}
+
+.spx-shell[data-theme="light"] {
+  --spx-bg: #f3f5f8;
+  --spx-surface: #ffffff;
+  --spx-panel: #f7f9fc;
+  --spx-border: #d9e0ea;
+  --spx-muted: #5c6b7d;
+  --spx-text: #122035;
+  --spx-accent: #2b6ef2;
+  --spx-grid: #dfe5ee;
+}
+
+.panel {
+  border: 1px solid var(--spx-border);
+  background: var(--spx-surface);
+  border-radius: 1rem;
+  padding: 0.9rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 2rem;
+  border-radius: 0.65rem;
+  border: 1px solid var(--spx-border);
+  background: var(--spx-panel);
+  color: var(--spx-text);
+  padding: 0 0.75rem;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.btn:hover {
+  border-color: var(--spx-accent);
+}
+
+.btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--spx-accent) 65%, transparent);
+  outline-offset: 1px;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-muted {
+  color: var(--spx-muted);
+}

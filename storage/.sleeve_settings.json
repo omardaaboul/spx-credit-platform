@@ -1,0 +1,9 @@
+{
+  "sleeve_capital": 10000,
+  "total_account": 160000,
+  "max_drawdown_pct": 15,
+  "daily_realized_pnl": 0,
+  "weekly_realized_pnl": 0,
+  "daily_lock": false,
+  "weekly_lock": false
+}

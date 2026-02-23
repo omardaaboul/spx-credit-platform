@@ -1,0 +1,250 @@
+{
+  "orders": [
+    {
+      "id": "2DTE-1771330550936",
+      "placed_at_iso": "2026-02-17T12:15:50.936Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Spread",
+      "right": "PUT",
+      "expiry": "2026-02-20",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "qty": 1,
+          "symbol": ".SPXW260220P5000"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "qty": 1,
+          "symbol": ".SPXW260220P4990"
+        }
+      ],
+      "paper_mode": true,
+      "paper_message": "Legacy state corrected: no confirmed paper execution.",
+      "paper_result": {
+        "ok": false,
+        "message": "Legacy state corrected: no confirmed paper execution."
+      }
+    },
+    {
+      "id": "2DTE-1771311325974",
+      "placed_at_iso": "2026-02-17T06:55:25.974Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Spread",
+      "right": "PUT",
+      "expiry": "2026-02-20",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "qty": 1,
+          "symbol": ".SPXW260220P5000"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "qty": 1,
+          "symbol": ".SPXW260220P4990"
+        }
+      ],
+      "paper_mode": true,
+      "paper_result": {
+        "ok": false,
+        "mode": "paper",
+        "message": "TastytradeError: TastytradeError('')"
+      },
+      "paper_message": "Paper submit failed: TastytradeError: TastytradeError('')"
+    },
+    {
+      "id": "2DTE-1771311111286",
+      "placed_at_iso": "2026-02-17T06:51:51.286Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Spread",
+      "right": "PUT",
+      "expiry": "2026-02-20",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "qty": 1,
+          "symbol": ".SPXW260220P5000"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "qty": 1,
+          "symbol": ".SPXW260220P4990"
+        }
+      ],
+      "paper_mode": true,
+      "paper_result": {
+        "ok": false,
+        "mode": "paper",
+        "message": ""
+      },
+      "paper_message": "Paper submit failed: {\"ok\": false, \"mode\": \"paper\", \"message\": \"\"}"
+    },
+    {
+      "id": "2DTE-1771308981986",
+      "placed_at_iso": "2026-02-17T06:16:21.986Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Spread",
+      "right": "PUT",
+      "expiry": "2026-02-20",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "qty": 1,
+          "symbol": ".SPXW260220P5000"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "qty": 1,
+          "symbol": ".SPXW260220P4990"
+        }
+      ],
+      "paper_mode": true,
+      "paper_result": {
+        "ok": false,
+        "message": "Paper trading requires TASTY_CLIENT_SECRET and TASTY_REFRESH_TOKEN."
+      },
+      "paper_message": "Paper trading requires TASTY_CLIENT_SECRET and TASTY_REFRESH_TOKEN."
+    },
+    {
+      "id": "2DTE-1771308016989",
+      "placed_at_iso": "2026-02-17T06:00:16.989Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Spread",
+      "right": "PUT",
+      "expiry": "2026-02-20",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "qty": 1,
+          "symbol": ".SPXW260220P5000"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "qty": 1,
+          "symbol": ".SPXW260220P4990"
+        }
+      ],
+      "paper_mode": true,
+      "paper_result": {
+        "ok": false,
+        "message": "Paper submit failed: Error: Command failed: .venv/bin/python /Users/omardaaboul/options-log/scripts/paper_two_dte_order.py"
+      },
+      "paper_message": "Paper submit failed: Error: Command failed: .venv/bin/python /Users/omardaaboul/options-log/scripts/paper_two_dte_order.py"
+    },
+    {
+      "id": "2DTE-1771307718379",
+      "placed_at_iso": "2026-02-17T05:55:18.379Z",
+      "status": "PAPER_FAILED",
+      "strategy": "Bull Put Credit Spread",
+      "right": "PUT",
+      "expiry": "2026-03-13",
+      "short_strike": 5000,
+      "long_strike": 4990,
+      "width": 10,
+      "entry_credit": 0.9,
+      "stop_debit": 2.7,
+      "profit_take_debit": 0.05,
+      "use_delta_stop": true,
+      "delta_stop": 0.4,
+      "max_loss_dollars": 910,
+      "notes": "Queued from dashboard Place Trade action.",
+      "legs": [
+        {
+          "action": "SELL",
+          "type": "PUT",
+          "strike": 5000,
+          "delta": -0.18,
+          "qty": 1,
+          "premium": 1.3,
+          "symbol": "FAKE_SHORT_PUT"
+        },
+        {
+          "action": "BUY",
+          "type": "PUT",
+          "strike": 4990,
+          "delta": -0.09,
+          "qty": 1,
+          "premium": 0.4,
+          "symbol": "FAKE_LONG_PUT"
+        }
+      ],
+      "paper_mode": true,
+      "paper_result": {
+        "ok": false,
+        "message": "Paper submit failed: Error: Command failed: .venv/bin/python /Users/omardaaboul/options-log/scripts/paper_two_dte_order.py\n<sys>:0: RuntimeWarning: coroutine 'Account.get' was never awaited\nRuntimeWarning: Enable tracemalloc to get the object allocation traceback\n"
+      },
+      "paper_message": "Paper submit failed: Error: Command failed: .venv/bin/python /Users/omardaaboul/options-log/scripts/paper_two_dte_order.py\n<sys>:0: RuntimeWarning: coroutine 'Account.get' was never awaited\nRuntimeWarning: Enable tracemalloc to get the object allocation traceback\n"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "narrowWidthCutoff": 55,
+  "creditOffsetNarrow": 0.16,
+  "creditOffsetWide": 0.21,
+  "debitOffsetNarrow": 0.11,
+  "debitOffsetWide": 0.16,
+  "markImpactPct": 0.04
+}

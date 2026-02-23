@@ -1,0 +1,40 @@
+# Environment
+.env*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node / Next.js
+.node_modules
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Data / local state
+storage/*.db
+storage/*.sqlite
+storage/*.sqlite3
+storage/*.jsonl
+storage/.alert_state.json
+storage/.alert_ack_state.json
+storage/.preflight_state.json
+storage/.evaluation_state.json
+runtime_data/
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+*.db
+
+# OS / misc
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*

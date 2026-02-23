@@ -1,0 +1,32 @@
+{
+  "updated_at_utc": "2026-02-22T08:40:00Z",
+  "events": [
+    {
+      "date": "2026-02-24",
+      "name": "CB Consumer Confidence",
+      "time_et": "10:00",
+      "type": "Sentiment",
+      "impact": "Medium",
+      "info": "Survey-based read on U.S. consumer sentiment and spending confidence.",
+      "url": "https://www.conference-board.org/topics/consumer-confidence"
+    },
+    {
+      "date": "2026-02-26",
+      "name": "Initial Jobless Claims",
+      "time_et": "08:30",
+      "type": "Labor",
+      "impact": "Medium",
+      "info": "Weekly labor-market stress indicator; surprises can move rates and index volatility.",
+      "url": "https://www.dol.gov/ui/data.pdf"
+    },
+    {
+      "date": "2026-02-27",
+      "name": "PPI (MoM, YoY) + Core PPI",
+      "time_et": "08:30",
+      "type": "Inflation",
+      "impact": "High",
+      "info": "Producer-level inflation read often watched as an early signal before CPI/PCE.",
+      "url": "https://www.bls.gov/ppi/"
+    }
+  ]
+}
