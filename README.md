@@ -1,53 +1,44 @@
-# SPX 0DTE Sustainable Alert Dashboard (Local Streamlit)
+# SPX Credit Spread Platform (Multi-DTE)
 
-A local-only Streamlit dashboard for monitoring **SPX 0DTE** option setups (Iron Condor + Iron Fly), applying strict sustainability gates, and sending Telegram alerts for both:
-- **Entry**: NOT READY -> READY transitions
-- **Exit**: open-trade exit criteria (profit/time/gamma/stop-loss)
+A local-first SPX decision-support platform focused on **multi-DTE credit spreads**:
+- **2 DTE**
+- **7 DTE**
+- **14 DTE**
+- **30 DTE**
+- **45 DTE**
 
+Primary UI is **Next.js + React + Tailwind** at `/spx-0dte`.  
 No live auto-trading. Paper-routing only when explicitly enabled.
-
-This repo now also includes a redesigned **React + Tailwind** UI at `/spx-0dte` with a Fortune-500-style layout, dark/light themes, charts, alert toasts, and explicit 4-leg rendering in alerts and open-trades tables.
 
 ## Features
 
-- Tastytrade market data client with polling baseline (10s default).
-- Sustainable framework implemented:
-  - Global no-trade day gates.
-  - Intraday volatility gates normalized to EMR.
-- Strategy-specific rules for Condor and Fly.
-- Directional credit spread module:
-  - Bull Put Spread in uptrends
-  - Bear Call Spread in downtrends
-  - Trend, timing, volatility, delta, POP, minimum credit, and liquidity filters
+- Multi-DTE credit spread engine for target buckets `2/7/14/30/45`.
+- Nearest-expiry bucket resolution + deterministic ranking.
+- Directional spread selection:
+  - Bull Put Spread in bullish regimes.
+  - Bear Call Spread in bearish regimes.
+- DTE-aware checks:
+  - delta bands
+  - expected move distance fit
+  - width rules
+  - credit/width bands
+  - positive theta
+  - z-score + measured-move logic
 - Trade lifecycle tracking:
   - Confirm entry from UI.
   - Persist open / exit_pending / closed status in local state.
   - Monitor open trades every poll cycle.
-- Exit logic (conservative):
-  - Condor: 50-70% profit capture, 90-minute hold cap, 14:30 ET cutoff, 10-cent buyback option, proximity/range/ATR risk exits.
-  - Fly: 30-50% profit capture, 60-minute cap, 13:45 ET cutoff, wing-touch stop.
-  - Final-30-minutes gamma-risk safeguard.
+- DTE-aware management plans (profit target, stop multiple, delta stop, time stop).
 - Telegram alert dedupe + cooldown:
-  - Entry: 5 minutes per strategy.
-  - Exit: configurable cooldown (default 2 minutes) per trade.
-  - Alerts include explicit 4-leg structure (PUT long/short + CALL short/long) with deltas.
+  - entry debounce + cooldown + daily caps
+  - dedupe by candidate/alert id
+  - includes DTE + expiry + strikes + spread type + spot
 - Local state persistence for readiness transitions and open trades.
 - Graceful degradation when data fields are unavailable.
-- 2-DTE Credit Spread sleeve:
-  - Integrated into the same primary decision pipeline as other strategies (no separate tab).
-  - Overbought/oversold + EMA/MACD + measured-move + distance/delta/credit checks.
-  - Bull-put or bear-call recommendation with auto-selected conservative delta band and width policy.
-  - Place-trade workflow routes to paper orders when enabled, otherwise queues locally, then monitors stop/profit conditions.
-- Hidden 21-DTE Broken-Wing Put Butterfly (BWB) sleeve:
-  - Backend-only sleeve (no dedicated dashboard card).
-  - Scans SPX/SPXW puts for a net-credit broken-wing structure in the 14-30 DTE window (target 21 DTE).
-  - Strict checks: IV rank, macro-event day block, short/long delta bands, wing ratio, credit floor, and account-risk caps.
-  - Auto-manages paper entry/exit signals and logs entries/exits/adjustments.
-- Primary Decision card:
-  - `Place (Paper)` submits paper-only entry orders for Iron Condor, Iron Fly, Directional Spread, Convex Debit Spread, and 2-DTE Credit Spread when `READY`.
+- Primary Decision card focuses on the current eligible multi-DTE candidate.
 - Pre-submit live symbol validation:
   - Paper submits are blocked if option symbols are malformed, stale, or not present in the latest live chain for that sleeve.
-  - 0-DTE primary strategies validate against live 0-DTE symbols, 2-DTE against live 2-DTE symbols, and BWB automation against live BWB symbols.
+  - Multi-DTE flows validate against the selected nearest expiry chain.
 - Replay QA + alert ACK:
   - Snapshot logs are written to `storage/spx0dte_snapshot_log.jsonl` for deterministic readiness replay.
   - Alerts can be acknowledged; acknowledged alerts are suppressed until their reason/legs materially change.
@@ -60,16 +51,25 @@ This repo now also includes a redesigned **React + Tailwind** UI at `/spx-0dte` 
   - Analytics scorecard by strategy/regime/macro/vol tags.
   - Walk-forward replay mode for rolling-window QA.
 
+## Active Strategy Set
+
+- **Enabled by default**:
+  - Multi-DTE SPX credit spreads: `2 DTE`, `7 DTE`, `14 DTE`, `30 DTE`, `45 DTE`
+- **Disabled by default**:
+  - 0DTE sleeves (`FEATURE_0DTE=false`)
+  - optional legacy/experimental sleeves (feature-gated)
+
 ## Project Structure
 
 - `app.py` - Streamlit dashboard app
 - `data/tasty.py` - tastytrade client + polling/streaming snapshot normalization
 - `signals/filters.py` - EMR/ATR/VWAP math and gate logic
-- `strategies/condor.py` - Iron Condor strike/width/POP logic
-- `strategies/fly.py` - Iron Fly strike/width/POP logic
+- `strategies/two_dte_credit.py` - 2-DTE selection + checklist rules
+- `strategies/credit_spreads.py` - shared multi-DTE directional spread logic
 - `strategies/exit.py` - exit evaluation engine for open trades
-- `strategies/credit_spreads.py` - directional vertical spread selector
-- `strategies/bwb_credit_put.py` - hidden 21-DTE broken-wing put butterfly selector + monitor
+- `strategies/condor.py` - legacy 0DTE module (feature-gated)
+- `strategies/fly.py` - legacy 0DTE module (feature-gated)
+- `strategies/bwb_credit_put.py` - optional legacy/experimental module (feature-gated)
 - `alerts/telegram.py` - Telegram formatting + send + 429 handling
 - `storage/state.py` - transition/cooldown + open-trade persistence
 - `storage/macro_calendar.py` - local macro event calendar loader
@@ -82,7 +82,7 @@ This repo now also includes a redesigned **React + Tailwind** UI at `/spx-0dte` 
 - `tests/test_credit_spreads.py` - trend + directional spread tests
 - `tests/test_telegram_formatting.py` - Telegram message formatting tests
 - `tests/test_bwb_credit.py` - BWB strike-selection and monitor tests
-- `app/spx-0dte/page.tsx` - redesigned SPX 0DTE UI (React)
+- `app/spx-0dte/page.tsx` - redesigned multi-DTE UI (React)
 - `app/api/spx0dte/route.ts` - lightweight dashboard data endpoint
 - `app/components/spx0dte/*` - reusable UI components (TopBar, cards, charts, alerts, table, toasts)
 - `lib/spx0dte.ts` - typed dashboard models + UI formatting helpers
@@ -325,36 +325,24 @@ React-only Telegram notes:
 ## Dashboard Behavior
 
 - Sidebar controls:
-  - Account NLV
-  - Risk %
-  - `LOSS_TODAY`
-  - Manual macro releases today
-  - Enable/disable entry alerts
-  - Enable/disable exit alerts
-  - Exit settings (profit targets, max hold, 10-cent, peg, cooldown)
-  - Wing width preferences
-  - Auto-refresh + polling interval
+  - Strategy/DTE filters and runtime controls
+  - Telegram alert toggles
+  - Polling and simulation settings
 - Top banner metrics:
-  - Paris time (with ET reference), SPX, EMR, VIX, IV, expected move
+  - ET time, SPX, EMR, VIX, IV, expected move
 - Candidate panels:
-  - Iron Condor Candidate
-  - Iron Fly Candidate
-  - Directional Spreads status card (READY / WAIT / NO TRADE) with trend strength and recommendation
+  - Multi-DTE credit spread candidates for `2/7/14/30/45`
+  - Directional status with trend strength and recommendation
 - Live entry gates:
   - pass/fail + detail for each gate
 - Open trades section:
   - trade table (P/L %, time in trade, status, next exit reason)
   - selected trade exit-gate checklist
   - manual close controls
-- 2-DTE trigger behavior:
-  - 2-DTE checklist remains active in the backend and appears in the shared CHECKLISTS view.
-  - When all 2-DTE criteria pass, it can become the Primary Decision candidate and trigger alerts like other strategies.
-  - Width and delta band are auto-selected conservatively from the strategy criteria policy (no manual tab controls).
-- Hidden BWB behavior:
-  - No dedicated UI card/tab.
-  - Backend monitors 21-DTE BWB criteria and can auto-route paper entry/exit when enabled.
-  - Exit/adjustment events are logged to `storage/bwb_trade_log.jsonl`.
-  - BWB now appears in the shared CHECKLISTS navigator/sections like other strategies, while remaining hidden from the NOW primary decision card.
+- DTE behavior:
+  - Nearest available expiry is selected for each target bucket (2/7/14/30/45).
+  - Width and delta bands are auto-selected from DTE-specific policy.
+  - Alerts trigger only when strict checklist rules pass.
 
 ### Replay QA
 
