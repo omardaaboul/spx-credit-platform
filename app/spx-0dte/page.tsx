@@ -1022,7 +1022,8 @@ function formatSecondsHms(totalSeconds: number): string {
 }
 
 function formatEventDate(isoDate: string): string {
-  const d = new Date(`${isoDate}T00:00:00Z`);
+  // Anchor at 12:00 UTC so ET formatting never drifts to the previous calendar day.
+  const d = new Date(`${isoDate}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return isoDate;
   return new Intl.DateTimeFormat("en-US", {
     weekday: "short",

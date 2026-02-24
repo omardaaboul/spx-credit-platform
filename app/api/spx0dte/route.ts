@@ -4825,16 +4825,13 @@ async function maybeSendMacroBlockAlert(payload: DashboardPayload, enabled: bool
   if (!enabled || !payload.market.isOpen) return;
   const state = loadSystemAlertState();
   const nowIso = new Date().toISOString();
-  const nowMs = Date.now();
-  const cooldownSec = Math.max(60, Number(process.env.SPX0DTE_MACRO_ALERT_COOLDOWN_SEC ?? 300));
-  const prevMs = parseIsoMs(state.lastMacroBlockSentAtIso);
-  const inCooldown = prevMs != null && nowMs - prevMs < cooldownSec * 1000;
 
   const macro = detectMacroBlockState(payload);
-  const macroKey = `${macro.macroActive}|${macro.macroDetail}`;
+  const macroKey = `${macro.macroActive}|${normalizeSystemIssueKey(macro.macroDetail)}`;
   const macroChanged = macroKey !== String(state.lastMacroBlockKey ?? "");
 
-  if (macro.macroActive && (!inCooldown || macroChanged || state.macroBlockActivePreviously === false)) {
+  // Macro notices are informational-only; emit once per active window.
+  if (macro.macroActive && (macroChanged || state.macroBlockActivePreviously !== true)) {
     const lines = [
       "⚠️ SPX0DTE MACRO EVENT NOTICE",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
