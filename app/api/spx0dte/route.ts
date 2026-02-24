@@ -2438,6 +2438,13 @@ function applyDataContract(payload: DashboardPayload): DashboardPayload {
   }
 
   const issue = contract.issues[0] ?? "Data contract degraded.";
+  if (!STRICT_LIVE_BLOCKS) {
+    return {
+      ...next,
+      warnings: Array.from(new Set([...(next.warnings ?? []), `DEGRADED: ${issue}`])).slice(0, 3),
+    };
+  }
+
   const gateRow = {
     name: "System Health gate (data contract)",
     status: "blocked" as const,

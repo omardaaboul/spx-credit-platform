@@ -250,7 +250,9 @@ export function applyDataContractToRows(
   section: "global" | "regime" | "strategy",
   strategy: Strategy | undefined,
   contract: DataContractResult,
+  options?: { strictLiveBlocks?: boolean },
 ): ChecklistItem[] {
+  const strictLiveBlocks = options?.strictLiveBlocks !== false;
   return rows.map((row) => {
     const requires = inferRequires(row, section);
     const dataAgeMs = Object.fromEntries(requires.map((k) => [k, contract.feeds[k]?.ageMs ?? null]));
@@ -272,7 +274,7 @@ export function applyDataContractToRows(
       };
     }
 
-    if (contract.status === "degraded" && requires.length > 0) {
+    if (strictLiveBlocks && contract.status === "degraded" && requires.length > 0) {
       const blockedFeed = requires
         .map((k) => contract.feeds[k])
         .find((feed) => !feed?.isValid);
