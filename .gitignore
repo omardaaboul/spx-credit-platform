@@ -26,6 +26,12 @@ storage/.alert_state.json
 storage/.alert_ack_state.json
 storage/.preflight_state.json
 storage/.evaluation_state.json
+storage/.entry_debounce_state.json
+storage/.iv_atm_cache.json
+storage/.last_spx_chart_series.json
+storage/.system_alert_state.json
+storage/.provider_health_state.json
+storage/.vol_expansion_state.json
 runtime_data/
 data/*.db
 data/*.sqlite
