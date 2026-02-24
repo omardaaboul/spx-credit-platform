@@ -304,7 +304,16 @@ class TastyDataClient:
         quote_timeout = self._env_float("SPX0DTE_STREAM_TIMEOUT_QUOTES", 1.4)
         candle_timeout = max(3.0, self._env_float("SPX0DTE_STREAM_TIMEOUT_CANDLES", 3.0))
         candle_retry_timeout = max(2.0, self._env_float("SPX0DTE_STREAM_TIMEOUT_CANDLES_RETRY", 2.5))
-        min_candle_events = max(15, min(self._env_int("SPX0DTE_MIN_CANDLE_EVENTS", 120), 1400))
+        # Allow deeper candle windows for multi-DTE indicator depth (7/14/30/45).
+        # Keep lower bound for robustness, but do not hard-cap at 1400 events.
+        min_candle_events = max(15, self._env_int("SPX0DTE_MIN_CANDLE_EVENTS", 120))
+        max_candle_events = max(
+            1400,
+            min(
+                self._env_int("SPX0DTE_MAX_CANDLE_EVENTS", candle_lookback_minutes + 120),
+                50_000,
+            ),
+        )
         max_quote_events = self._env_int("SPX0DTE_MAX_QUOTE_EVENTS", 140)
         backoff_s = 1.0
 
@@ -399,7 +408,7 @@ class TastyDataClient:
                         streamer,
                         Candle,
                         timeout_s=candle_timeout,
-                        max_events=1400,
+                        max_events=max_candle_events,
                         min_events=min_candle_events,
                     )
                     if len(candles) < min_candle_events and candle_retry_timeout > 0:
@@ -407,7 +416,7 @@ class TastyDataClient:
                             streamer,
                             Candle,
                             timeout_s=candle_retry_timeout,
-                            max_events=1400,
+                            max_events=max_candle_events,
                             min_events=min_candle_events,
                         )
                         if extra:

@@ -227,14 +227,14 @@ def evaluate_two_dte_credit_spread(
     bullish = ema8_last > ema21_last and ema21_slope > 0 and (macd_hist >= 0 or macd_line[-1] > macd_signal)
     bearish = ema8_last < ema21_last and ema21_slope < 0 and (macd_hist <= 0 or macd_line[-1] < macd_signal)
     rows.append(
-        _pass("Bullish regime", f"EMA8 {ema8_last:.2f} > EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}")
+        _pass("Bullish regime", f"EMA8 {ema8_last:.2f} > EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
         if bullish
-        else _fail("Bullish regime", f"EMA8 {ema8_last:.2f}, EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}")
+        else _fail("Bullish regime", f"EMA8 {ema8_last:.2f}, EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
     )
     rows.append(
-        _pass("Bearish regime", f"EMA8 {ema8_last:.2f} < EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}")
+        _pass("Bearish regime", f"EMA8 {ema8_last:.2f} < EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
         if bearish
-        else _fail("Bearish regime", f"EMA8 {ema8_last:.2f}, EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}")
+        else _fail("Bearish regime", f"EMA8 {ema8_last:.2f}, EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
     )
 
     iv_atm = _compute_atm_iv(options_2dte, spot, selected_dte)

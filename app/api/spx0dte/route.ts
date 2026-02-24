@@ -60,6 +60,8 @@ const ALLOW_SIM_ALERTS = allowSimAlertsEnabled();
 const STRICT_LIVE_BLOCKS = String(process.env.STRICT_LIVE_BLOCKS ?? "false").toLowerCase() !== "false";
 const ENABLE_SYSTEM_HEALTH_ALERTS =
   String(process.env.SPX0DTE_ENABLE_SYSTEM_HEALTH_ALERTS ?? "false").toLowerCase() !== "false";
+const ENABLE_GATE_NOTICE_ALERTS =
+  String(process.env.SPX0DTE_ENABLE_GATE_NOTICE_ALERTS ?? "false").toLowerCase() !== "false";
 const ENABLE_MACRO_ALERTS =
   String(process.env.SPX0DTE_ENABLE_MACRO_ALERTS ?? "true").toLowerCase() !== "false";
 const FEATURE_0DTE = feature0dteEnabled();
@@ -5057,7 +5059,7 @@ export async function GET(request: Request) {
   saveProviderHealthState(payload);
   const canSendOperationalAlerts = telegramEnabled && (marketOpen || (marketClosedOverride && ALLOW_SIM_ALERTS));
   await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts && ENABLE_SYSTEM_HEALTH_ALERTS);
-  await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts);
+  await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts && ENABLE_GATE_NOTICE_ALERTS);
   await maybeSendMacroBlockAlert(payload, canSendOperationalAlerts && ENABLE_MACRO_ALERTS);
 
   await maybeSendTelegramAlerts(payload.alerts, canSendOperationalAlerts);
