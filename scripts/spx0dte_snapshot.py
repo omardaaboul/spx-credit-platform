@@ -413,6 +413,16 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def _market_open_et(now_et: dt.datetime) -> bool:
     if now_et.weekday() >= 5:
         return False
@@ -1777,7 +1787,9 @@ def main() -> None:
 
     client = TastyDataClient(symbol="SPX")
     # Pull enough 1m history to satisfy the longest 30m-bar requirement (45-DTE profile).
-    snapshot = client.fetch_snapshot(symbol="SPX", candle_lookback_minutes=6000)
+    # 24,000m ~= 16.7 days of 1m bars, usually enough to build >=130 30m bars.
+    candle_lookback_minutes = max(6000, _env_int("SPX0DTE_CANDLE_LOOKBACK_MINUTES", 24000))
+    snapshot = client.fetch_snapshot(symbol="SPX", candle_lookback_minutes=candle_lookback_minutes)
     all_candles = snapshot.candles_1m
     session_candles = _session_candles_today(all_candles, now_et)
 
