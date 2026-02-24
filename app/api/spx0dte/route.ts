@@ -60,6 +60,8 @@ const ALLOW_SIM_ALERTS = allowSimAlertsEnabled();
 const STRICT_LIVE_BLOCKS = String(process.env.STRICT_LIVE_BLOCKS ?? "false").toLowerCase() !== "false";
 const ENABLE_SYSTEM_HEALTH_ALERTS =
   String(process.env.SPX0DTE_ENABLE_SYSTEM_HEALTH_ALERTS ?? "false").toLowerCase() !== "false";
+const ENABLE_MACRO_ALERTS =
+  String(process.env.SPX0DTE_ENABLE_MACRO_ALERTS ?? "true").toLowerCase() !== "false";
 const FEATURE_0DTE = feature0dteEnabled();
 
 type TelegramDedupeState = {
@@ -79,6 +81,7 @@ type SystemAlertState = {
   lastMacroBlockKey?: string;
   lastMacroBlockSentAtIso?: string;
   macroBlockActivePreviously?: boolean;
+  lastMacroNoticeDailyKey?: string;
 };
 
 type EntryDebounceState = {
@@ -4829,9 +4832,17 @@ async function maybeSendMacroBlockAlert(payload: DashboardPayload, enabled: bool
   const macro = detectMacroBlockState(payload);
   const macroKey = `${macro.macroActive}|${normalizeSystemIssueKey(macro.macroDetail)}`;
   const macroChanged = macroKey !== String(state.lastMacroBlockKey ?? "");
+  const etDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(nowIso));
+  const macroDailyKey = `${etDate}|${normalizeSystemIssueKey(macro.macroDetail)}`;
+  const alreadySentToday = macroDailyKey === String(state.lastMacroNoticeDailyKey ?? "");
 
   // Macro notices are informational-only; emit once per active window.
-  if (macro.macroActive && (macroChanged || state.macroBlockActivePreviously !== true)) {
+  if (macro.macroActive && !alreadySentToday && (macroChanged || state.macroBlockActivePreviously !== true)) {
     const lines = [
       "⚠️ SPX0DTE MACRO EVENT NOTICE",
       `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
@@ -4844,6 +4855,7 @@ async function maybeSendMacroBlockAlert(payload: DashboardPayload, enabled: bool
       state.lastMacroBlockSentAtIso = nowIso;
       state.lastMacroBlockKey = macroKey;
       state.macroBlockActivePreviously = true;
+      state.lastMacroNoticeDailyKey = macroDailyKey;
       saveSystemAlertState(state);
     }
     return;
@@ -5046,7 +5058,7 @@ export async function GET(request: Request) {
   const canSendOperationalAlerts = telegramEnabled && (marketOpen || (marketClosedOverride && ALLOW_SIM_ALERTS));
   await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts && ENABLE_SYSTEM_HEALTH_ALERTS);
   await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts);
-  await maybeSendMacroBlockAlert(payload, canSendOperationalAlerts);
+  await maybeSendMacroBlockAlert(payload, canSendOperationalAlerts && ENABLE_MACRO_ALERTS);
 
   await maybeSendTelegramAlerts(payload.alerts, canSendOperationalAlerts);
 
