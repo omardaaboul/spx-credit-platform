@@ -45,7 +45,7 @@ CONFIG: dict[str, dict[str, Any]] = {
         "strike_dist_vs_em": [1.10, 1.80],
         "width_rule": {"type": "em_fraction", "fraction": 0.08, "round_to": 5, "min": 10, "max": 25},
         "credit_pct_width": [0.10, 0.20],
-        "z_threshold": 1.00,
+        "z_threshold": 0.90,
         "sr_buffer_em_mult": 0.30,
         "profit_take_pct_credit": 0.55,
         "stop_mult_credit": 1.8,
@@ -59,7 +59,7 @@ CONFIG: dict[str, dict[str, Any]] = {
         "strike_dist_vs_em": [1.40, 2.30],
         "width_rule": {"type": "em_fraction", "fraction": 0.07, "round_to": 5, "min": 5, "max": 15},
         "credit_pct_width": [0.08, 0.15],
-        "z_threshold": 1.15,
+        "z_threshold": 1.00,
         "sr_buffer_em_mult": 0.35,
         "profit_take_pct_credit": 0.70,
         "stop_mult_credit": 1.5,
@@ -73,7 +73,7 @@ CONFIG: dict[str, dict[str, Any]] = {
         "strike_dist_vs_em": [1.60, 3.00],
         "width_rule": {"type": "fixed_prefer_small", "choices": [5, 10]},
         "credit_pct_width": [0.05, 0.12],
-        "z_threshold": 1.25,
+        "z_threshold": 1.10,
         "sr_buffer_em_mult": 0.45,
         "profit_take_pct_credit": 0.85,
         "profit_take_buyback_abs": 0.05,
@@ -86,9 +86,9 @@ CONFIG: dict[str, dict[str, Any]] = {
 Z_THRESHOLD_MAP: dict[int, float] = {
     45: 0.80,
     30: 0.90,
-    14: 1.00,
-    7: 1.15,
-    2: 1.25,
+    14: 0.90,
+    7: 1.00,
+    2: 1.10,
 }
 
 MMC_STRETCH_MAP: dict[int, float] = {
