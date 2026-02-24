@@ -23,16 +23,14 @@ def telegram_configured() -> bool:
 
 
 def tasty_credentials_present() -> bool:
-    have_user = bool((os.getenv("TASTY_USERNAME") or os.getenv("TASTYTRADE_USERNAME")) and (os.getenv("TASTY_PASSWORD") or os.getenv("TASTYTRADE_PASSWORD")))
-    have_oauth = bool(os.getenv("TASTY_CLIENT_SECRET") and os.getenv("TASTY_REFRESH_TOKEN"))
-    return have_user or have_oauth
+    return bool(os.getenv("TASTY_API_TOKEN") and os.getenv("TASTY_API_SECRET"))
 
 
 def required_env_issues() -> List[str]:
     issues: List[str] = []
     if not simulation_mode() and not tasty_credentials_present():
         issues.append(
-            "Missing broker credentials. Set TASTY_USERNAME/TASTY_PASSWORD or TASTY_CLIENT_SECRET/TASTY_REFRESH_TOKEN."
+            "Missing broker credentials. Set TASTY_API_TOKEN and TASTY_API_SECRET."
         )
     if alerts_enabled() and not telegram_configured():
         issues.append(

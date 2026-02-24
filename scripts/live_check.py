@@ -15,7 +15,7 @@ TT = ROOT / "tt_live_check" / "tt_live_check.py"
 def main() -> int:
     out = {
         "env": {
-            "tasty_auth_present": bool((os.getenv("TASTY_CLIENT_SECRET") and os.getenv("TASTY_REFRESH_TOKEN")) or (os.getenv("TASTY_USERNAME") and os.getenv("TASTY_PASSWORD"))),
+            "tasty_auth_present": bool(os.getenv("TASTY_API_TOKEN") and os.getenv("TASTY_API_SECRET")),
             "telegram_configured": bool(
                 (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_TOKEN")) and os.getenv("TELEGRAM_CHAT_ID")
             ),

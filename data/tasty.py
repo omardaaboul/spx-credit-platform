@@ -71,7 +71,9 @@ class TastyDataClient:
         self.symbol = symbol
         # Keep trading-mode compatibility but allow market-data mode to be controlled separately.
         # If override is not set, default market-data to live (is_test=False) for reliable SPX/SPXW chain access.
-        self._is_test = os.getenv("TASTY_IS_TEST", "false").lower() in {"1", "true", "yes", "on"}
+        env_mode = (os.getenv("TASTY_ENV") or "").strip().lower()
+        env_is_test = env_mode == "sandbox"
+        self._is_test = env_is_test or (os.getenv("TASTY_IS_TEST", "false").lower() in {"1", "true", "yes", "on"})
         md_override = os.getenv("TASTY_MARKETDATA_IS_TEST")
         self._marketdata_override_explicit = md_override is not None
         if md_override is None:
@@ -87,9 +89,7 @@ class TastyDataClient:
             return MarketSnapshot(
                 timestamp_et=now_et,
                 warnings=[
-                    "Missing tastytrade credentials. Set TASTY_USERNAME/TASTY_PASSWORD "
-                    "(or TASTYTRADE_USERNAME/TASTYTRADE_PASSWORD) or "
-                    "TASTY_CLIENT_SECRET/TASTY_REFRESH_TOKEN."
+                    "TASTY_AUTH_FAILED: Missing tastytrade credentials. Set TASTY_API_TOKEN and TASTY_API_SECRET."
                 ],
             )
 
@@ -154,7 +154,7 @@ class TastyDataClient:
         session = self._build_sdk_session(Session, is_test_mode=is_test_mode)
         if session is None:
             snapshot.warnings.append(
-                f"Unable to authenticate to tastytrade in is_test={str(is_test_mode).lower()} mode."
+                f"TASTY_AUTH_FAILED: Unable to authenticate to tastytrade in is_test={str(is_test_mode).lower()} mode."
             )
             return snapshot
 
@@ -537,17 +537,17 @@ class TastyDataClient:
 
     @staticmethod
     def _has_any_tasty_credentials() -> bool:
-        username = os.getenv("TASTY_USERNAME") or os.getenv("TASTYTRADE_USERNAME")
-        password = os.getenv("TASTY_PASSWORD") or os.getenv("TASTYTRADE_PASSWORD")
-        have_user = bool(username and password)
-        have_oauth = bool(os.getenv("TASTY_CLIENT_SECRET") and os.getenv("TASTY_REFRESH_TOKEN"))
-        return have_user or have_oauth
+        token = os.getenv("TASTY_API_TOKEN")
+        secret = os.getenv("TASTY_API_SECRET")
+        return bool(token and secret)
 
     def _build_sdk_session(self, Session: Any, is_test_mode: bool) -> Any:
-        secret = os.getenv("TASTY_CLIENT_SECRET")
-        refresh = os.getenv("TASTY_REFRESH_TOKEN")
-        username = os.getenv("TASTY_USERNAME") or os.getenv("TASTYTRADE_USERNAME")
-        password = os.getenv("TASTY_PASSWORD") or os.getenv("TASTYTRADE_PASSWORD")
+        # Repo-level contract is token+secret only.
+        # For tastytrade SDK, map:
+        # - TASTY_API_SECRET -> provider_secret / client secret
+        # - TASTY_API_TOKEN  -> refresh token / API token
+        secret = os.getenv("TASTY_API_SECRET")
+        token = os.getenv("TASTY_API_TOKEN")
 
         try:
             param_names = list(inspect.signature(Session).parameters.keys())
@@ -558,10 +558,8 @@ class TastyDataClient:
         requires_oauth = "provider_secret" in param_names and "refresh_token" in param_names
 
         attempts: list[tuple[str, str]] = []
-        if secret and refresh:
-            attempts.append((secret, refresh))
-        if not requires_oauth and username and password:
-            attempts.append((username, password))
+        if secret and token:
+            attempts.append((secret, token))
 
         kwargs_priority: list[dict[str, Any]] = [{"is_test": is_test_mode}, {}]
 

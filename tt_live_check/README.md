@@ -2,7 +2,7 @@
 Minimal live connectivity check for SPX option quotes/greeks using `tastytrade` + `DXLinkStreamer`.
 
 ## What it does
-- Logs in with `TASTYTRADE_USERNAME` + `TASTYTRADE_PASSWORD`
+- Logs in with `TASTY_API_TOKEN` + `TASTY_API_SECRET`
 - Finds nearest SPX expiration (prefers 0DTE if available)
 - Selects 6 contracts around ATM (3 calls + 3 puts)
 - Subscribes to `Quote` + `Greeks` via DXLink
@@ -30,11 +30,9 @@ python3 tt_live_check/tt_live_check.py --duration 30 --retries 3
 ## Required env vars
 For `tastytrade>=12.x`:
 ```bash
-export TASTY_CLIENT_SECRET="..."
-export TASTY_REFRESH_TOKEN="..."
+export TASTY_API_TOKEN="..."
+export TASTY_API_SECRET="..."
 ```
-
-Legacy username/password is only used if your installed SDK exposes that session signature.
 
 ## Expected PASS output (example)
 ```text

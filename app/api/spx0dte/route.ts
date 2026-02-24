@@ -51,6 +51,7 @@ const ALERT_POLICY_PATH = path.join(process.cwd(), "storage", ".alert_policy.jso
 const ALERT_POLICY_STATE_PATH = path.join(process.cwd(), "storage", ".alert_policy_state.json");
 const PRECHECK_STATE_PATH = path.join(process.cwd(), "storage", ".preflight_state.json");
 const SYSTEM_ALERT_STATE_PATH = path.join(process.cwd(), "storage", ".system_alert_state.json");
+const PROVIDER_HEALTH_STATE_PATH = path.join(process.cwd(), "storage", ".provider_health_state.json");
 const ENTRY_DEBOUNCE_STATE_PATH = path.join(process.cwd(), "storage", ".entry_debounce_state.json");
 const EVALUATION_STATE_PATH = path.join(process.cwd(), "storage", ".evaluation_state.json");
 const DEBUG_MODE = String(process.env.SPX0DTE_DEBUG || "false").toLowerCase() === "true";
@@ -95,6 +96,15 @@ type EntryDebounceState = {
 type EvaluationRuntimeState = {
   tickId: number;
   lastTickIso: string;
+};
+
+type ProviderHealthState = {
+  provider_status: "tastytrade-live" | "tastytrade-partial" | "down";
+  auth_status: "ok" | "refreshing" | "failed";
+  last_auth_ok_ts: string | null;
+  updated_at: string;
+  issue_codes: string[];
+  source?: string;
 };
 
 type AlertAckState = {
@@ -542,7 +552,7 @@ function attachStartupHealth(payload: DashboardPayload): DashboardPayload {
         label: credentialsOk ? "PRESENT" : "MISSING",
         detail: credentialsOk
           ? "Tasty credentials found."
-          : "Set TASTY_USERNAME/TASTY_PASSWORD (or TASTYTRADE_USERNAME/TASTYTRADE_PASSWORD) or TASTY_CLIENT_SECRET/TASTY_REFRESH_TOKEN.",
+          : "Set TASTY_API_TOKEN and TASTY_API_SECRET.",
       },
     },
   };
@@ -682,6 +692,7 @@ function unavailableStrategyRows(strategy: string): Array<{ name: string; status
 
 function compactWarning(message: string): string {
   const lower = message.toLowerCase();
+  if (lower.includes("tasty_auth_failed")) return "TASTY_AUTH_FAILED";
   if (lower.includes("missing tastytrade credentials")) return "Credentials missing.";
   if (lower.includes("unable to authenticate")) return "Auth failed.";
   if (lower.includes("index snapshot request failed")) return "SPX/VIX snapshot request failed.";
@@ -1532,17 +1543,19 @@ function mapBwbCloseLegs(position: BwbPosition): Array<{ symbol: string; action:
 function paperTradingConfig() {
   const enabled = String(process.env.SPX0DTE_PAPER_TRADING || "").toLowerCase() === "true";
   const dryRun = String(process.env.SPX0DTE_PAPER_DRY_RUN || "false").toLowerCase() === "true";
-  const isTest = String(process.env.TASTY_IS_TEST || "false").toLowerCase() === "true";
+  const isTest =
+    String(process.env.TASTY_ENV || "").toLowerCase() === "sandbox" ||
+    String(process.env.TASTY_IS_TEST || "false").toLowerCase() === "true";
   const requireTest = String(process.env.SPX0DTE_PAPER_REQUIRE_TEST || "true").toLowerCase() === "true";
   const accountNumber = process.env.TASTY_ACCOUNT_NUMBER || process.env.SPX0DTE_PAPER_ACCOUNT_NUMBER || "";
-  const oauthCreds = Boolean(process.env.TASTY_CLIENT_SECRET && process.env.TASTY_REFRESH_TOKEN);
+  const oauthCreds = Boolean(process.env.TASTY_API_SECRET && process.env.TASTY_API_TOKEN);
   const ready = enabled && (!requireTest || isTest) && oauthCreds;
   const detail = !enabled
     ? "Paper trading disabled (set SPX0DTE_PAPER_TRADING=true)."
     : requireTest && !isTest
       ? "Paper trading requires TASTY_IS_TEST=true."
       : !oauthCreds
-        ? "Paper trading requires TASTY_CLIENT_SECRET and TASTY_REFRESH_TOKEN."
+        ? "Paper trading requires TASTY_API_TOKEN and TASTY_API_SECRET."
         : "Paper trading enabled.";
   return { enabled, dryRun, isTest, requireTest, accountNumber, ready, detail };
 }
@@ -2567,6 +2580,72 @@ function saveEvaluationState(state: EvaluationRuntimeState): void {
   try {
     mkdirSync(path.dirname(EVALUATION_STATE_PATH), { recursive: true });
     writeFileSync(EVALUATION_STATE_PATH, JSON.stringify(state, null, 2));
+  } catch {
+    // best effort
+  }
+}
+
+function loadProviderHealthState(): ProviderHealthState {
+  try {
+    if (!existsSync(PROVIDER_HEALTH_STATE_PATH)) {
+      return {
+        provider_status: "down",
+        auth_status: "failed",
+        last_auth_ok_ts: null,
+        updated_at: new Date().toISOString(),
+        issue_codes: [],
+      };
+    }
+    const parsed = JSON.parse(readFileSync(PROVIDER_HEALTH_STATE_PATH, "utf8")) as ProviderHealthState;
+    if (!parsed || typeof parsed !== "object") throw new Error("invalid state");
+    return {
+      provider_status: parsed.provider_status ?? "down",
+      auth_status: parsed.auth_status ?? "failed",
+      last_auth_ok_ts: parsed.last_auth_ok_ts ?? null,
+      updated_at: parsed.updated_at ?? new Date().toISOString(),
+      issue_codes: Array.isArray(parsed.issue_codes) ? parsed.issue_codes.map((v) => String(v)) : [],
+      source: parsed.source ? String(parsed.source) : undefined,
+    };
+  } catch {
+    return {
+      provider_status: "down",
+      auth_status: "failed",
+      last_auth_ok_ts: null,
+      updated_at: new Date().toISOString(),
+      issue_codes: [],
+    };
+  }
+}
+
+function saveProviderHealthState(payload: DashboardPayload): void {
+  try {
+    const current = loadProviderHealthState();
+    const warnings = (payload.warnings ?? []).map((w) => String(w));
+    const hasAuthFailure = warnings.some((w) => /tasty_auth_failed|auth failed|unable to authenticate/i.test(w));
+    const issueCodes = hasAuthFailure ? ["TASTY_AUTH_FAILED"] : [];
+    const source = String(payload.market?.source ?? "unknown");
+    const providerStatus: ProviderHealthState["provider_status"] =
+      source === "tastytrade-live"
+        ? "tastytrade-live"
+        : source.includes("tastytrade")
+          ? "tastytrade-partial"
+          : "down";
+    const authStatus: ProviderHealthState["auth_status"] = hasAuthFailure
+      ? "failed"
+      : providerStatus === "tastytrade-live"
+        ? "ok"
+        : "refreshing";
+
+    const next: ProviderHealthState = {
+      provider_status: providerStatus,
+      auth_status: authStatus,
+      last_auth_ok_ts: authStatus === "ok" ? new Date().toISOString() : current.last_auth_ok_ts,
+      updated_at: new Date().toISOString(),
+      issue_codes: issueCodes,
+      source,
+    };
+    mkdirSync(path.dirname(PROVIDER_HEALTH_STATE_PATH), { recursive: true });
+    writeFileSync(PROVIDER_HEALTH_STATE_PATH, JSON.stringify(next, null, 2));
   } catch {
     // best effort
   }
@@ -4959,6 +5038,7 @@ export async function GET(request: Request) {
   persistLastChartSeries(payload);
   savePreflight(payload.preflight);
   appendSnapshotLog(payload);
+  saveProviderHealthState(payload);
   const canSendOperationalAlerts = telegramEnabled && (marketOpen || (marketClosedOverride && ALLOW_SIM_ALERTS));
   await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts && ENABLE_SYSTEM_HEALTH_ALERTS);
   await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts);

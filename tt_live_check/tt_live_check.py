@@ -134,31 +134,22 @@ def _load_env() -> None:
 
 def _build_session(Session: Any) -> Any:
     params = list(inspect.signature(Session).parameters.keys())
-    # tastytrade>=12 uses OAuth provider_secret + refresh_token.
+    provider_secret = os.getenv("TASTY_API_SECRET")
+    refresh_token = os.getenv("TASTY_API_TOKEN")
+    if not provider_secret or not refresh_token:
+        raise RuntimeError("TASTY_AUTH_FAILED: Missing credentials. Set TASTY_API_TOKEN and TASTY_API_SECRET.")
+    # SDK expects provider_secret + refresh_token style constructor in modern versions.
+    variants: list[tuple[list[Any], dict[str, Any]]] = []
     if "provider_secret" in params and "refresh_token" in params:
-        provider_secret = os.getenv("TASTY_CLIENT_SECRET") or os.getenv("TASTYTRADE_CLIENT_SECRET")
-        refresh_token = os.getenv("TASTY_REFRESH_TOKEN") or os.getenv("TASTYTRADE_REFRESH_TOKEN")
-        if not provider_secret or not refresh_token:
-            raise RuntimeError(
-                "This tastytrade SDK version requires OAuth credentials. "
-                "Set TASTY_CLIENT_SECRET and TASTY_REFRESH_TOKEN."
-            )
-        variants: list[tuple[list[Any], dict[str, Any]]] = [
+        variants.extend([
             ([provider_secret, refresh_token], {"is_test": False}),
             ([provider_secret, refresh_token], {}),
-        ]
+        ])
     else:
-        username = os.getenv("TASTYTRADE_USERNAME") or os.getenv("TASTY_USERNAME")
-        password = os.getenv("TASTYTRADE_PASSWORD") or os.getenv("TASTY_PASSWORD")
-        if not username or not password:
-            raise RuntimeError(
-                "Missing credentials. Set TASTYTRADE_USERNAME and TASTYTRADE_PASSWORD "
-                "(or TASTY_USERNAME/TASTY_PASSWORD)."
-            )
-        variants = [
-            ([username, password], {"is_test": False}),
-            ([username, password], {}),
-        ]
+        variants.extend([
+            ([provider_secret, refresh_token], {"is_test": False}),
+            ([provider_secret, refresh_token], {}),
+        ])
 
     last_exc: Optional[Exception] = None
     for args, kwargs in variants:
@@ -166,7 +157,7 @@ def _build_session(Session: Any) -> Any:
             return Session(*args, **kwargs)
         except Exception as exc:
             last_exc = exc
-    raise RuntimeError(f"Login failed: {last_exc}")
+    raise RuntimeError(f"TASTY_AUTH_FAILED: Login failed: {last_exc}")
 
 
 def _chain_rows(chain: Any) -> list[Any]:

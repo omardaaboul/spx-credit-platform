@@ -36,34 +36,16 @@ export function telegramConfigured(): boolean {
   return Boolean(telegramToken() && telegramChatId());
 }
 
-export function tastyUsername(): string {
-  return (
-    process.env.TASTY_USERNAME ||
-    process.env.TASTYTRADE_USERNAME ||
-    ""
-  ).trim();
+export function tastyApiToken(): string {
+  return (process.env.TASTY_API_TOKEN || "").trim();
 }
 
-export function tastyPassword(): string {
-  return (
-    process.env.TASTY_PASSWORD ||
-    process.env.TASTYTRADE_PASSWORD ||
-    ""
-  ).trim();
-}
-
-export function tastyOauthSecret(): string {
-  return (process.env.TASTY_CLIENT_SECRET || "").trim();
-}
-
-export function tastyOauthRefresh(): string {
-  return (process.env.TASTY_REFRESH_TOKEN || "").trim();
+export function tastyApiSecret(): string {
+  return (process.env.TASTY_API_SECRET || "").trim();
 }
 
 export function tastyCredentialsPresent(): boolean {
-  const userPass = Boolean(tastyUsername() && tastyPassword());
-  const oauth = Boolean(tastyOauthSecret() && tastyOauthRefresh());
-  return userPass || oauth;
+  return Boolean(tastyApiToken() && tastyApiSecret());
 }
 
 export function operationalModeLabel(): "SIM" | "LIVE" {
@@ -79,7 +61,7 @@ export function requiredEnvIssues(): string[] {
 
   if (!simulationModeEnabled() && !tastyCredentialsPresent()) {
     issues.push(
-      "Missing broker credentials. Set TASTY_USERNAME/TASTY_PASSWORD or TASTY_CLIENT_SECRET/TASTY_REFRESH_TOKEN.",
+      "Missing broker credentials. Set TASTY_API_TOKEN and TASTY_API_SECRET.",
     );
   }
 

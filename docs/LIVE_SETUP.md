@@ -35,8 +35,8 @@ Use `.env.example` as the source of truth. Minimum runtime requirements:
 - `SIMULATION_MODE` (`true|false`)
 - `FEATURE_0DTE` (`false` by default)
 - Broker auth:
-  - `TASTY_USERNAME` + `TASTY_PASSWORD`, or
-  - `TASTY_CLIENT_SECRET` + `TASTY_REFRESH_TOKEN`
+  - `TASTY_API_TOKEN` + `TASTY_API_SECRET`
+  - optional: `TASTY_ENV=live|sandbox`
 - Telegram (only if `SPX0DTE_ENABLE_TELEGRAM=true`):
   - `TELEGRAM_BOT_TOKEN` (or legacy `TELEGRAM_TOKEN`)
   - `TELEGRAM_CHAT_ID`

@@ -22,10 +22,8 @@ def _read_payload() -> dict[str, Any]:
 def _session():
     from tastytrade import Session
 
-    secret = os.getenv("TASTY_CLIENT_SECRET")
-    refresh = os.getenv("TASTY_REFRESH_TOKEN")
-    username = os.getenv("TASTY_USERNAME") or os.getenv("TASTYTRADE_USERNAME")
-    password = os.getenv("TASTY_PASSWORD") or os.getenv("TASTYTRADE_PASSWORD")
+    secret = os.getenv("TASTY_API_SECRET")
+    refresh = os.getenv("TASTY_API_TOKEN")
     is_test = os.getenv("TASTY_IS_TEST", "false").lower() in {"1", "true", "yes", "on"}
     require_test = os.getenv("SPX0DTE_PAPER_REQUIRE_TEST", "true").lower() in {"1", "true", "yes", "on"}
 
@@ -42,16 +40,13 @@ def _session():
         if not (secret and refresh):
             raise RuntimeError(
                 "Installed tastytrade SDK requires OAuth credentials. "
-                "Set TASTY_CLIENT_SECRET and TASTY_REFRESH_TOKEN."
+                "Set TASTY_API_TOKEN and TASTY_API_SECRET."
             )
         return Session(secret, refresh, is_test=is_test)
 
-    # Backward compatibility for legacy SDK variants.
-    if username and password:
-        return Session(username, password, is_test=is_test)
     if secret and refresh:
         return Session(secret, refresh, is_test=is_test)
-    raise RuntimeError("Missing tasty credentials for paper trading.")
+    raise RuntimeError("TASTY_AUTH_FAILED: Missing tasty credentials for paper trading (TASTY_API_TOKEN/TASTY_API_SECRET).")
 
 
 async def _maybe_await(value: Any) -> Any:

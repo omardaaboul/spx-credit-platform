@@ -99,13 +99,9 @@ No live auto-trading. Paper-routing only when explicitly enabled.
 Set in your shell or `.env`:
 
 ```bash
-# tastytrade credentials (choose one auth style)
-TASTY_USERNAME=...
-TASTY_PASSWORD=...
-
-# optional OAuth-style (if used in your account flow)
-TASTY_CLIENT_SECRET=...
-TASTY_REFRESH_TOKEN=...
+# tastytrade credentials (token+secret only)
+TASTY_API_TOKEN=...
+TASTY_API_SECRET=...
 
 # optional test environment toggle
 TASTY_IS_TEST=false
@@ -268,6 +264,11 @@ npm run start
 curl -s http://127.0.0.1:8000/health | jq
 curl -s http://127.0.0.1:3000/api/health | jq
 ```
+
+`/api/health` includes provider auth/runtime fields:
+- `auth_status`: `ok | refreshing | failed`
+- `provider_status`: `tastytrade-live | tastytrade-partial | down`
+- `last_auth_ok_ts`: last successful tasty auth timestamp (UTC)
 
 ## Setup
 
