@@ -584,3 +584,29 @@ Environment template:
 ```bash
 cp .env.example .env
 ```
+
+## VPS Deploy & Verification
+
+Make scripts executable once:
+
+```bash
+chmod +x scripts/*.sh
+```
+
+Deploy on VPS:
+
+```bash
+APP_DIR=/opt/spx SERVICE_NAME=spx-dashboard ./scripts/deploy_vps.sh
+```
+
+Verify `/api/spx0dte` schema + integrity invariants:
+
+```bash
+HOST=127.0.0.1 PORT=3000 ./scripts/verify_spx0dte.sh
+```
+
+Verify + scan logs for integrity blocks:
+
+```bash
+./scripts/verify_spx0dte.sh --logs
+```
