@@ -119,12 +119,12 @@ function buildPivotZones(candles: CandlestickPoint[]): PivotZone[] {
 
 export default function SpxChartModule({ selectedDte, em1sd, spot, zScore, mmcPassed, levels }: Props) {
   const [tf, setTf] = useState<Tf>("5m");
-  const [showEma20, setShowEma20] = useState(true);
-  const [showEma50, setShowEma50] = useState(true);
-  const [showVwap, setShowVwap] = useState(false);
-  const [showSr, setShowSr] = useState(true);
-  const [showEm2, setShowEm2] = useState(false);
-  const [showTradeLines, setShowTradeLines] = useState(true);
+  const showEma20 = true;
+  const showEma50 = true;
+  const showVwap = false;
+  const showSr = true;
+  const showEm2 = false;
+  const showTradeLines = true;
   const [candles, setCandles] = useState<CandlestickPoint[]>([]);
   const [vwapLine, setVwapLine] = useState<LinePoint[]>([]);
   const [sourceLabel, setSourceLabel] = useState("-");
@@ -501,15 +501,6 @@ export default function SpxChartModule({ selectedDte, em1sd, spot, zScore, mmcPa
         ))}
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-        <Toggle label="EMA20" value={showEma20} onChange={setShowEma20} />
-        <Toggle label="EMA50" value={showEma50} onChange={setShowEma50} />
-        <Toggle label="VWAP" value={showVwap} onChange={setShowVwap} />
-        <Toggle label="S/R" value={showSr} onChange={setShowSr} />
-        <Toggle label="±2 EM" value={showEm2} onChange={setShowEm2} />
-        <Toggle label="Trade lines" value={showTradeLines} onChange={setShowTradeLines} />
-      </div>
-
       <div
         style={{
           display: "flex",
@@ -635,24 +626,4 @@ function pillStyle(background: string, color: string): CSSProperties {
     fontWeight: 600,
     letterSpacing: "0.02em",
   };
-}
-
-function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!value)}
-      style={{
-        borderRadius: 999,
-        border: "1px solid #cbd5e1",
-        background: value ? "#dbeafe" : "#ffffff",
-        color: value ? "#1d4ed8" : "#334155",
-        padding: "4px 9px",
-        fontSize: 11,
-        cursor: "pointer",
-      }}
-    >
-      {label}
-    </button>
-  );
 }
