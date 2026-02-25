@@ -1152,6 +1152,20 @@ function buildUnavailablePayload(message: string): SnapshotWithWarnings {
         greeks_age_ok: false,
       },
     },
+    dataFeeds: {
+      underlying_price: {
+        timestampIso: null,
+        source: "market-closed",
+      },
+      option_chain: {
+        timestampIso: null,
+        source: "market-closed",
+      },
+      greeks: {
+        timestampIso: null,
+        source: "market-closed",
+      },
+    },
     warnings: [message],
     twoDte: {
       ready: false,
