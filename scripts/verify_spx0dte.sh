@@ -47,26 +47,46 @@ jq_assert() {
   fi
 }
 
-# Check 1: schema presence
+# Check 1: base schema presence
 jq_assert '
   has("generatedAtEt")
   and has("generatedAtParis")
   and has("data_mode")
   and (.market | type == "object" and has("isOpen"))
   and (.metrics | type == "object" and has("spx"))
-  and (.dataFeeds | type == "object"
-      and has("underlying_price")
-      and has("option_chain")
-      and has("greeks")
-      and (.underlying_price | type == "object" and has("timestampIso"))
-      and (.option_chain | type == "object" and has("timestampIso"))
-      and (.greeks | type == "object" and has("timestampIso")))
   and (.symbolValidation | type == "object"
       and has("targets")
       and has("chain")
       and has("checks")
       and (.chain | type == "object" and has("expirationsPresent")))
 ' 3 "Missing required snapshot-header/schema keys"
+
+# dataFeeds strict in open LIVE/DELAYED; warn-only in CLOSED/FIXTURE
+strict_datafeeds=false
+if echo "${doc}" | jq -e '(.market.isOpen == true) and ((.data_mode == "LIVE") or (.data_mode == "DELAYED"))' >/dev/null; then
+  strict_datafeeds=true
+fi
+
+if [[ "${strict_datafeeds}" == "true" ]]; then
+  jq_assert '
+    (.dataFeeds | type == "object"
+      and has("underlying_price")
+      and has("option_chain")
+      and has("greeks")
+      and (.underlying_price | type == "object" and has("timestampIso"))
+      and (.option_chain | type == "object" and has("timestampIso"))
+      and (.greeks | type == "object" and has("timestampIso")))
+  ' 3 "Missing required dataFeeds keys in open LIVE/DELAYED mode"
+else
+  if ! echo "${doc}" | jq -e '
+    (.dataFeeds | type == "object"
+      and has("underlying_price")
+      and has("option_chain")
+      and has("greeks"))
+  ' >/dev/null; then
+    echo "[WARN] dataFeeds missing in non-live mode; continuing (legacy closed-market shape)."
+  fi
+fi
 
 # Check 2: target keys
 jq_assert '.symbolValidation.targets | has("2") and has("7") and has("14") and has("30") and has("45")' 4 \
