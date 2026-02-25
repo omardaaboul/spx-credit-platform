@@ -110,6 +110,51 @@ async function loadRouteWithMockedExec(snapshot: Record<string, unknown>) {
   return { GET: route.GET, execFileSync };
 }
 
+function expectSnapshotHeaderShape(payload: Record<string, unknown>) {
+  expect(typeof payload.generatedAtEt).toBe("string");
+  expect(typeof payload.generatedAtParis).toBe("string");
+  expect(typeof payload.data_mode).toBe("string");
+
+  const market = payload.market as Record<string, unknown>;
+  expect(typeof market).toBe("object");
+  expect(typeof market.isOpen).toBe("boolean");
+
+  const metrics = payload.metrics as Record<string, unknown>;
+  expect(typeof metrics).toBe("object");
+  expect(metrics.spx).not.toBeUndefined();
+
+  const dataFeeds = payload.dataFeeds as Record<string, unknown>;
+  expect(typeof dataFeeds).toBe("object");
+  expect(dataFeeds).not.toBeNull();
+  expect((dataFeeds.underlying_price as Record<string, unknown>).timestampIso).not.toBeUndefined();
+  expect((dataFeeds.option_chain as Record<string, unknown>).timestampIso).not.toBeUndefined();
+  expect((dataFeeds.greeks as Record<string, unknown>).timestampIso).not.toBeUndefined();
+
+  const symbolValidation = payload.symbolValidation as Record<string, unknown>;
+  expect(typeof symbolValidation).toBe("object");
+  expect(symbolValidation).not.toBeNull();
+
+  const targets = symbolValidation.targets as Record<string, unknown>;
+  expect(targets).not.toBeNull();
+  expect(typeof targets).toBe("object");
+  expect(targets["2"]).toBeDefined();
+  expect(targets["7"]).toBeDefined();
+  expect(targets["14"]).toBeDefined();
+  expect(targets["30"]).toBeDefined();
+  expect(targets["45"]).toBeDefined();
+
+  const chain = symbolValidation.chain as Record<string, unknown>;
+  expect(Array.isArray(chain.expirationsPresent)).toBe(true);
+
+  const checks = symbolValidation.checks as Record<string, unknown>;
+  expect(typeof checks.spot_reasonable).toBe("boolean");
+  expect(typeof checks.chain_has_target_expirations).toBe("boolean");
+  expect(typeof checks.greeks_match_chain).toBe("boolean");
+  expect(typeof checks.spot_age_ok).toBe("boolean");
+  expect(typeof checks.chain_age_ok).toBe("boolean");
+  expect(typeof checks.greeks_age_ok).toBe("boolean");
+}
+
 describe("market closed override for /api/spx0dte", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -129,6 +174,7 @@ describe("market closed override for /api/spx0dte", () => {
     const { GET, execFileSync } = await loadRouteWithMockedExec(buildClosedSnapshot());
     const response = await GET(new Request("http://localhost:3000/api/spx0dte"));
     const payload = (await response.json()) as Record<string, unknown>;
+    expectSnapshotHeaderShape(payload);
 
     expect(payload.market_closed_override).toBe(false);
     expect((payload.market as Record<string, unknown>).isOpen).toBe(false);
@@ -153,6 +199,7 @@ describe("market closed override for /api/spx0dte", () => {
     const { GET, execFileSync } = await loadRouteWithMockedExec(buildClosedSnapshot());
     const response = await GET(new Request("http://localhost:3000/api/spx0dte"));
     const payload = (await response.json()) as Record<string, unknown>;
+    expectSnapshotHeaderShape(payload);
 
     const calledSnapshotScript = execFileSync.mock.calls.some(
       (call) =>
