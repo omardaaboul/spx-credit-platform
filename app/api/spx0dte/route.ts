@@ -3582,6 +3582,58 @@ function forceClosed(payload: DashboardPayload): DashboardPayload {
   };
 }
 
+function ensureSnapshotHeaderShape(payload: DashboardPayload): DashboardPayload {
+  const currentTargets = (payload.symbolValidation?.targets ?? {}) as Record<
+    string,
+    { expiration: string | null; symbols?: string[] }
+  >;
+  const normalizedTargets: Record<string, { expiration: string | null; symbols?: string[] }> = {
+    "2": currentTargets["2"] ?? { expiration: null, symbols: [] },
+    "7": currentTargets["7"] ?? { expiration: null, symbols: [] },
+    "14": currentTargets["14"] ?? { expiration: null, symbols: [] },
+    "30": currentTargets["30"] ?? { expiration: null, symbols: [] },
+    "45": currentTargets["45"] ?? { expiration: null, symbols: [] },
+  };
+
+  return {
+    ...payload,
+    dataFeeds: {
+      underlying_price: {
+        timestampIso: payload.dataFeeds?.underlying_price?.timestampIso ?? null,
+        source: payload.dataFeeds?.underlying_price?.source ?? payload.market?.source ?? "unknown",
+      },
+      option_chain: {
+        timestampIso: payload.dataFeeds?.option_chain?.timestampIso ?? null,
+        source: payload.dataFeeds?.option_chain?.source ?? payload.market?.source ?? "unknown",
+      },
+      greeks: {
+        timestampIso: payload.dataFeeds?.greeks?.timestampIso ?? null,
+        source: payload.dataFeeds?.greeks?.source ?? payload.market?.source ?? "unknown",
+      },
+    },
+    symbolValidation: {
+      dte0: payload.symbolValidation?.dte0 ?? [],
+      dte2: payload.symbolValidation?.dte2 ?? [],
+      bwb: payload.symbolValidation?.bwb ?? [],
+      targets: normalizedTargets,
+      chain: {
+        underlyingSymbol: payload.symbolValidation?.chain?.underlyingSymbol ?? "SPX",
+        chainExpiryMin: payload.symbolValidation?.chain?.chainExpiryMin ?? null,
+        chainExpiryMax: payload.symbolValidation?.chain?.chainExpiryMax ?? null,
+        expirationsPresent: payload.symbolValidation?.chain?.expirationsPresent ?? [],
+      },
+      checks: {
+        spot_reasonable: payload.symbolValidation?.checks?.spot_reasonable ?? false,
+        chain_has_target_expirations: payload.symbolValidation?.checks?.chain_has_target_expirations ?? false,
+        greeks_match_chain: payload.symbolValidation?.checks?.greeks_match_chain ?? false,
+        chain_age_ok: payload.symbolValidation?.checks?.chain_age_ok ?? false,
+        spot_age_ok: payload.symbolValidation?.checks?.spot_age_ok ?? false,
+        greeks_age_ok: payload.symbolValidation?.checks?.greeks_age_ok ?? false,
+      },
+    },
+  };
+}
+
 function allRequiredPass(
   rows: Array<{ status: "pass" | "fail" | "blocked" | "na"; required?: boolean }> | undefined,
 ): boolean {
@@ -5256,6 +5308,7 @@ export async function GET(request: Request) {
   };
   payload = withDataModeAndAges(payload, marketClosedOverride);
   payload = applySnapshotHeaderIntegrityGuards(payload, ctx);
+  payload = ensureSnapshotHeaderShape(payload);
   const decision = evaluateDecision(buildDecisionInput(payload));
   payload = {
     ...payload,
