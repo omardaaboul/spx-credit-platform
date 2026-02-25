@@ -86,11 +86,66 @@ CONFIG_STRICT: dict[str, dict[str, Any]] = {
 }
 
 DTE_PROFILE_BALANCED: dict[int, dict[str, float]] = {
-    2: {"delta_min": 0.05, "delta_max": 0.12, "sd_min": 1.10, "sd_max": 2.50, "credit_pct_min": 0.04, "credit_pct_max": 0.14, "z_threshold": 0.55},
-    7: {"delta_min": 0.08, "delta_max": 0.16, "sd_min": 0.95, "sd_max": 2.10, "credit_pct_min": 0.06, "credit_pct_max": 0.16, "z_threshold": 0.50},
-    14: {"delta_min": 0.12, "delta_max": 0.22, "sd_min": 0.80, "sd_max": 1.75, "credit_pct_min": 0.08, "credit_pct_max": 0.22, "z_threshold": 0.50},
-    30: {"delta_min": 0.16, "delta_max": 0.28, "sd_min": 0.70, "sd_max": 1.45, "credit_pct_min": 0.10, "credit_pct_max": 0.26, "z_threshold": 0.45},
-    45: {"delta_min": 0.18, "delta_max": 0.30, "sd_min": 0.65, "sd_max": 1.30, "credit_pct_min": 0.12, "credit_pct_max": 0.30, "z_threshold": 0.40},
+    2: {
+        "delta_min": 0.04,
+        "delta_max": 0.16,
+        "sd_min": 0.85,
+        "sd_max": 2.50,
+        "dist_min_em": 0.65,
+        "dist_max_em": 2.80,
+        "credit_pct_min": 0.03,
+        "credit_pct_max": 0.14,
+        "z_threshold": 0.55,
+        "sr_buffer_em_mult": 0.18,
+    },
+    7: {
+        "delta_min": 0.08,
+        "delta_max": 0.18,
+        "sd_min": 0.75,
+        "sd_max": 2.10,
+        "dist_min_em": 0.60,
+        "dist_max_em": 2.20,
+        "credit_pct_min": 0.05,
+        "credit_pct_max": 0.16,
+        "z_threshold": 0.50,
+        "sr_buffer_em_mult": 0.20,
+    },
+    14: {
+        "delta_min": 0.12,
+        "delta_max": 0.24,
+        "sd_min": 0.70,
+        "sd_max": 1.75,
+        "dist_min_em": 0.55,
+        "dist_max_em": 1.85,
+        "credit_pct_min": 0.08,
+        "credit_pct_max": 0.22,
+        "z_threshold": 0.50,
+        "sr_buffer_em_mult": 0.18,
+    },
+    30: {
+        "delta_min": 0.16,
+        "delta_max": 0.28,
+        "sd_min": 0.70,
+        "sd_max": 1.45,
+        "dist_min_em": 0.65,
+        "dist_max_em": 1.45,
+        "credit_pct_min": 0.10,
+        "credit_pct_max": 0.26,
+        "z_threshold": 0.45,
+        "sr_buffer_em_mult": 0.22,
+    },
+    45: {
+        "delta_min": 0.18,
+        "delta_max": 0.30,
+        "sd_min": 0.65,
+        "sd_max": 1.30,
+        "dist_min_em": 0.60,
+        "dist_max_em": 1.30,
+        "credit_pct_min": 0.12,
+        "credit_pct_max": 0.30,
+        "z_threshold": 0.40,
+        "sr_buffer_em_mult": 0.20,
+    },
 }
 
 Z_THRESHOLD_MAP: dict[int, float] = {int(k): float(v.get("z_threshold", 0.0)) for k, v in CONFIG_STRICT.items()}
@@ -154,8 +209,10 @@ def _build_config_for_preset(preset: str) -> dict[str, dict[str, Any]]:
         cfg = config[key]
         cfg["short_abs_delta_band"] = [float(profile["delta_min"]), float(profile["delta_max"])]
         cfg["target_sd_multiple"] = [float(profile["sd_min"]), float(profile["sd_max"])]
+        cfg["strike_dist_vs_em"] = [float(profile["dist_min_em"]), float(profile["dist_max_em"])]
         cfg["credit_pct_width"] = [float(profile["credit_pct_min"]), float(profile["credit_pct_max"])]
         cfg["z_threshold"] = float(profile["z_threshold"])
+        cfg["sr_buffer_em_mult"] = float(profile["sr_buffer_em_mult"])
     return config
 
 
