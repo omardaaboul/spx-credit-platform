@@ -21,12 +21,28 @@ if ! payload="$(curl -sf "${URL}")"; then
   exit 7
 fi
 
+doc="$(echo "${payload}" | jq -c '
+  if type == "object" and (has("generatedAtEt") or has("data_mode") or has("symbolValidation")) then .
+  elif type == "object" and (.data | type == "object") then .data
+  elif type == "object" and (.payload | type == "object") then .payload
+  else .
+  end
+')"
+
 jq_assert() {
   local expr="$1"
   local code="$2"
   local msg="$3"
-  if ! echo "${payload}" | jq -e "${expr}" >/dev/null; then
+  if ! echo "${doc}" | jq -e "${expr}" >/dev/null; then
     echo "[ERROR] ${msg}"
+    if [[ "${code}" == "3" ]]; then
+      echo "[DEBUG] Top-level keys:"
+      echo "${payload}" | jq 'if type=="object" then keys else "non-object-payload" end'
+      echo "[DEBUG] Normalized-doc keys:"
+      echo "${doc}" | jq 'if type=="object" then keys else "non-object-doc" end'
+      echo "[DEBUG] Response excerpt:"
+      echo "${payload}" | jq '{status,ok,message,error,code,data_mode,generatedAtEt,generatedAtParis}'
+    fi
     exit "${code}"
   fi
 }
@@ -63,7 +79,7 @@ has_rec_expr='.recommendation.short_strike != null and .recommendation.expiry !=
 
 # Check 3: READY integrity implication (top-level ready)
 if echo "${payload}" | jq -e '.ready == true' >/dev/null; then
-  if ! echo "${payload}" | jq -e "${checks_all_true_expr} and (${has_rec_expr})" >/dev/null; then
+  if ! echo "${doc}" | jq -e "${checks_all_true_expr} and (${has_rec_expr})" >/dev/null; then
     echo "[ERROR] READY payload failed integrity implication."
     echo "${payload}" | jq '{ready,reason,data_mode,spx:.metrics.spx,checks:.symbolValidation.checks,recommendation:{short_strike:.recommendation.short_strike,expiry:.recommendation.expiry}}'
     exit 5
@@ -71,36 +87,36 @@ if echo "${payload}" | jq -e '.ready == true' >/dev/null; then
 fi
 
 # Check 3b: READY integrity implication (candidate rows)
-if echo "${payload}" | jq -e '
+if echo "${doc}" | jq -e '
   (.candidates // [])
   | any(.ready == true and ((.recommendation.short_strike == null) or (.recommendation.expiry == null)))
 ' >/dev/null; then
   echo "[ERROR] At least one READY candidate is missing recommendation.short_strike or recommendation.expiry"
-  echo "${payload}" | jq '{readyCandidates:[(.candidates // [])[] | select(.ready==true) | {strategy,ready,reason,recommendation}]}'
+  echo "${doc}" | jq '{readyCandidates:[(.candidates // [])[] | select(.ready==true) | {strategy,ready,reason,recommendation}]}'
   exit 5
 fi
 
 # Check 4: BLOCKED consistency
-if echo "${payload}" | jq -e "(${checks_all_true_expr}) | not" >/dev/null; then
-  if echo "${payload}" | jq -e 'has("ready") and has("reason")' >/dev/null; then
-    if ! echo "${payload}" | jq -e '(.ready == false) or ((.reason // "") | startswith("BLOCKED:"))' >/dev/null; then
+if echo "${doc}" | jq -e "(${checks_all_true_expr}) | not" >/dev/null; then
+  if echo "${doc}" | jq -e 'has("ready") and has("reason")' >/dev/null; then
+    if ! echo "${doc}" | jq -e '(.ready == false) or ((.reason // "") | startswith("BLOCKED:"))' >/dev/null; then
       echo "[ERROR] Integrity checks are false but payload is not blocked/not-ready."
-      echo "${payload}" | jq '{ready,reason,data_mode,spx:.metrics.spx,checks:.symbolValidation.checks}'
+      echo "${doc}" | jq '{ready,reason,data_mode,spx:.metrics.spx,checks:.symbolValidation.checks}'
       exit 6
     fi
   else
-    if ! echo "${payload}" | jq -e '
+    if ! echo "${doc}" | jq -e '
       (.candidates // [])
       | all(.ready != true or ((.reason // "") | startswith("BLOCKED:")))
     ' >/dev/null; then
       echo "[ERROR] Integrity checks are false but at least one READY candidate is not BLOCKED."
-      echo "${payload}" | jq '{checks:.symbolValidation.checks,readyCandidates:[(.candidates // [])[] | select(.ready==true) | {strategy,reason}]}'
+      echo "${doc}" | jq '{checks:.symbolValidation.checks,readyCandidates:[(.candidates // [])[] | select(.ready==true) | {strategy,reason}]}'
       exit 6
     fi
   fi
 fi
 
-echo "${payload}" | jq '{
+echo "${doc}" | jq '{
   data_mode,
   market_is_open: .market.isOpen,
   spx: .metrics.spx,
