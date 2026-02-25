@@ -20,7 +20,15 @@ if [[ ! -d "${APP_DIR}" ]]; then
   exit 10
 fi
 
-cd "${APP_DIR}"
+if [[ -d "${APP_DIR}/.git" ]]; then
+  cd "${APP_DIR}"
+elif [[ -d "${APP_DIR}/spx-credit-platform/.git" ]]; then
+  echo "[WARN] APP_DIR is a parent directory; using ${APP_DIR}/spx-credit-platform"
+  cd "${APP_DIR}/spx-credit-platform"
+else
+  echo "[ERROR] No git repo found at APP_DIR=${APP_DIR} (or APP_DIR/spx-credit-platform)"
+  exit 11
+fi
 echo "[STEP] git pull --ff-only"
 git pull --ff-only
 

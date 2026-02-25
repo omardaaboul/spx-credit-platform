@@ -33,7 +33,7 @@ jq_assert() {
 
 check_key_exists() {
   local key="$1"
-  jq_assert "([path(${key})] | length) > 0" 3 "Missing required key: ${key}"
+  jq_assert "haspath(${key})" 3 "Missing required key: ${key}"
 }
 
 # Check 1: schema presence
