@@ -536,6 +536,32 @@ npm test -- tests/spx0dte-ui.test.ts
 6. Package issues:
    - Recreate venv and reinstall `requirements.txt`.
 
+## Automated Integrity Checks (VPS)
+
+Run API consistency checks automatically every 2 minutes via `systemd`:
+
+1. Install timer/service on VPS:
+```bash
+cd /opt/spx/spx-credit-platform
+bash scripts/install_integrity_timer.sh
+```
+2. Verify timer:
+```bash
+systemctl list-timers --all | grep spx0dte-integrity-check
+systemctl status spx0dte-integrity-check.timer --no-pager
+```
+3. Inspect results:
+```bash
+tail -f /var/log/spx0dte/integrity-check.log
+```
+
+The checker script is `scripts/auto_integrity_check.sh` and validates:
+- `symbolValidation.checks` integrity fields during `LIVE/DELAYED` open sessions
+- freshness flags (`spot_age_ok`, `chain_age_ok`, `greeks_age_ok`)
+- invalid `READY` candidates that still carry `BLOCKED:` reasons
+
+It emits one JSON line per run and exits non-zero on failures for easy alerting.
+
 ## Safety
 
 - Live trading is not auto-routed by this dashboard.

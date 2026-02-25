@@ -1,0 +1,12 @@
+[Unit]
+Description=SPX0DTE integrity check (oneshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/spx/spx-credit-platform
+ExecStart=/bin/bash /opt/spx/spx-credit-platform/scripts/auto_integrity_check.sh http://127.0.0.1:3000/api/spx0dte
+StandardOutput=append:/var/log/spx0dte/integrity-check.log
+StandardError=append:/var/log/spx0dte/integrity-check.log
+
