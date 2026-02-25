@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Settings, X } from "lucide-react";
 import type { CandidateCard, DashboardPayload } from "@/lib/spx0dte";
 import { useSpxDashboardData } from "@/app/components/spx0dte/useSpxDashboardData";
-import SpxChartModule from "@/app/components/spx0dte/SpxChartModule";
 import styles from "./Dashboard.module.css";
 
 const POLL_MS = 60_000;
@@ -127,18 +126,6 @@ export default function Spx0DtePage() {
     () => (data?.openTrades ?? []).filter((trade) => trade.status === "OPEN" || trade.status === "EXIT_PENDING"),
     [data?.openTrades],
   );
-  const chartLevels = useMemo(() => {
-    const activeTrade = openTrades[0];
-    const tradeShort = activeTrade?.legs.find((leg) => leg.action === "SELL")?.strike ?? null;
-    const tradeLong = activeTrade?.legs.find((leg) => leg.action === "BUY")?.strike ?? null;
-    const shortStrike = spread.shortStrike ?? tradeShort;
-    const longStrike = spread.longStrike ?? tradeLong;
-    return {
-      shortStrike,
-      longStrike,
-      breakevens: [spread.lowerBreakeven, spread.upperBreakeven],
-    };
-  }, [openTrades, spread.lowerBreakeven, spread.longStrike, spread.shortStrike, spread.upperBreakeven]);
   const upcomingMacro = useMemo(
     () =>
       (data?.upcomingMacroEvents ?? [])
@@ -452,17 +439,6 @@ export default function Spx0DtePage() {
                 )}
               </section>
             </div>
-
-            <section className={styles.card}>
-              <SpxChartModule
-                selectedDte={candidateDte?.selectedDte ?? candidateDte?.targetDte ?? null}
-                em1sd={candidateExpectedMove}
-                spot={spot}
-                zScore={candidateZScore}
-                mmcPassed={candidateMmcPassed}
-                levels={chartLevels}
-              />
-            </section>
 
             <section className={styles.card}>
               <h2 className={styles.heading}>Open Trades</h2>
