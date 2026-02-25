@@ -3,13 +3,15 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import math
+import os
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 from data.tasty import CandleBar, OptionSnapshot
 
 
-CONFIG: dict[str, dict[str, Any]] = {
+CONFIG_STRICT: dict[str, dict[str, Any]] = {
     "45": {
         "min_30m_bars": 130,
         "short_abs_delta_band": [0.18, 0.28],
@@ -83,13 +85,15 @@ CONFIG: dict[str, dict[str, Any]] = {
     },
 }
 
-Z_THRESHOLD_MAP: dict[int, float] = {
-    45: 0.80,
-    30: 0.90,
-    14: 0.90,
-    7: 0.90,
-    2: 0.95,
+DTE_PROFILE_BALANCED: dict[int, dict[str, float]] = {
+    2: {"delta_min": 0.05, "delta_max": 0.12, "sd_min": 1.10, "sd_max": 2.50, "credit_pct_min": 0.04, "credit_pct_max": 0.14, "z_threshold": 0.55},
+    7: {"delta_min": 0.08, "delta_max": 0.16, "sd_min": 0.95, "sd_max": 2.10, "credit_pct_min": 0.06, "credit_pct_max": 0.16, "z_threshold": 0.50},
+    14: {"delta_min": 0.12, "delta_max": 0.22, "sd_min": 0.80, "sd_max": 1.75, "credit_pct_min": 0.08, "credit_pct_max": 0.22, "z_threshold": 0.50},
+    30: {"delta_min": 0.16, "delta_max": 0.28, "sd_min": 0.70, "sd_max": 1.45, "credit_pct_min": 0.10, "credit_pct_max": 0.26, "z_threshold": 0.45},
+    45: {"delta_min": 0.18, "delta_max": 0.30, "sd_min": 0.65, "sd_max": 1.30, "credit_pct_min": 0.12, "credit_pct_max": 0.30, "z_threshold": 0.40},
 }
+
+Z_THRESHOLD_MAP: dict[int, float] = {int(k): float(v.get("z_threshold", 0.0)) for k, v in CONFIG_STRICT.items()}
 
 MMC_STRETCH_MAP: dict[int, float] = {
     45: 0.85,
@@ -98,6 +102,88 @@ MMC_STRETCH_MAP: dict[int, float] = {
     7: 1.55,
     2: 1.90,
 }
+
+Z_EDGE_PENALTY_BY_DTE: dict[int, float] = {
+    2: 0.35,
+    7: 0.30,
+    14: 0.25,
+    30: 0.20,
+    45: 0.15,
+}
+
+MACD_HARD_DTES_DEFAULT: set[int] = {2, 7}
+MACD_SOFT_PENALTY_DEFAULT = 0.10
+THETA_EPSILON_LONG_DTE_DEFAULT = -0.01
+SR_BUFFER_MULT_BY_DTE: dict[int, float] = {2: 0.5, 7: 0.75, 14: 1.0, 30: 1.0, 45: 1.0}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return float(default)
+    try:
+        return float(raw.strip())
+    except Exception:
+        return float(default)
+
+
+def _env_int_set(name: str, default: set[int]) -> set[int]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return set(default)
+    values: set[int] = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            values.add(int(token))
+        except Exception:
+            continue
+    return values or set(default)
+
+
+def _build_config_for_preset(preset: str) -> dict[str, dict[str, Any]]:
+    config = deepcopy(CONFIG_STRICT)
+    if preset != "balanced":
+        return config
+    for dte, profile in DTE_PROFILE_BALANCED.items():
+        key = str(int(dte))
+        if key not in config:
+            continue
+        cfg = config[key]
+        cfg["short_abs_delta_band"] = [float(profile["delta_min"]), float(profile["delta_max"])]
+        cfg["target_sd_multiple"] = [float(profile["sd_min"]), float(profile["sd_max"])]
+        cfg["credit_pct_width"] = [float(profile["credit_pct_min"]), float(profile["credit_pct_max"])]
+        cfg["z_threshold"] = float(profile["z_threshold"])
+    return config
+
+
+def _runtime_policy() -> dict[str, Any]:
+    preset = str(os.getenv("STRATEGY_PRESET", "balanced")).strip().lower()
+    if preset not in {"balanced", "strict"}:
+        preset = "balanced"
+
+    z_mode_env = os.getenv("Z_EDGE_MODE")
+    if z_mode_env is None or not z_mode_env.strip():
+        z_edge_mode = "hard" if preset == "strict" else "soft"
+    else:
+        z_edge_mode = z_mode_env.strip().lower()
+        if z_edge_mode not in {"soft", "hard"}:
+            z_edge_mode = "soft"
+
+    config = _build_config_for_preset(preset)
+    z_threshold_map = {int(k): float(v.get("z_threshold", 0.0)) for k, v in config.items()}
+    return {
+        "preset": preset,
+        "config": config,
+        "z_edge_mode": z_edge_mode,
+        "z_threshold_map": z_threshold_map,
+        "z_edge_penalty_by_dte": dict(Z_EDGE_PENALTY_BY_DTE),
+        "macd_hard_dtes": _env_int_set("MACD_HARD_DTES", MACD_HARD_DTES_DEFAULT),
+        "macd_soft_penalty": _env_float("MACD_SOFT_PENALTY", MACD_SOFT_PENALTY_DEFAULT),
+        "theta_epsilon_long_dte": _env_float("THETA_EPSILON_LONG_DTE", THETA_EPSILON_LONG_DTE_DEFAULT),
+    }
 
 
 @dataclass
@@ -155,11 +241,18 @@ def evaluate_two_dte_credit_spread(
     nearest_resistance: Optional[float] = None,
     catalyst_blocked: bool = False,
     catalyst_detail: str | None = None,
+    chain_expirations_present: Optional[Sequence[dt.date]] = None,
+    spot_timestamp_iso: Optional[str] = None,
+    chain_timestamp_iso: Optional[str] = None,
+    greeks_timestamp_iso: Optional[str] = None,
 ) -> dict:
+    policy = _runtime_policy()
     rows: list[dict] = []
     selected_dte = max(0, (expiration_2dte - now_et.date()).days) if expiration_2dte is not None else int(target_dte)
-    cfg_key, cfg = _config_for_target(target_dte)
+    cfg_key, cfg = _config_for_target(target_dte, policy["config"])
+    bucket = int(cfg_key)
     rows.append(_pass("Target DTE profile", f"target={target_dte}, selected={selected_dte}, profile={cfg_key}-DTE"))
+    rows.append(_pass("Strategy preset", f"{policy['preset']} (z-edge mode: {policy['z_edge_mode']})", required=False))
 
     if not settings.enabled:
         return _result(
@@ -186,6 +279,33 @@ def evaluate_two_dte_credit_spread(
             rows,
             None,
             _metrics_payload({}, cfg_key, target_dte, selected_dte),
+        )
+    present_expiries = {
+        exp for exp in (chain_expirations_present or []) if isinstance(exp, dt.date)
+    }
+    expiry_present_ok = not present_expiries or expiration_2dte in present_expiries
+    rows.append(
+        _pass("Chain expiry presence", f"Selected expiry {expiration_2dte.isoformat()} found in chain expirations.")
+        if expiry_present_ok
+        else _fail("Chain expiry presence", f"Selected expiry {expiration_2dte.isoformat()} missing from chain expirations.")
+    )
+    if not expiry_present_ok:
+        return _result(
+            False,
+            f"BLOCKED: Chain missing selected expiry {expiration_2dte.isoformat()} for target {target_dte}",
+            rows,
+            None,
+            _metrics_payload(
+                {
+                    "spot_ts": spot_timestamp_iso,
+                    "chain_ts": chain_timestamp_iso,
+                    "greeks_ts": greeks_timestamp_iso,
+                    "chain_expirations_present": sorted(exp.isoformat() for exp in present_expiries),
+                },
+                cfg_key,
+                target_dte,
+                selected_dte,
+            ),
         )
 
     if catalyst_blocked:
@@ -224,8 +344,19 @@ def evaluate_two_dte_credit_spread(
     signed_z = (cur_close - float(basis)) / float(sigma)
     measured_move, measured_ratio = _measured_move_completion(closes)
 
-    bullish = ema8_last > ema21_last and ema21_slope > 0 and (macd_hist >= 0 or macd_line[-1] > macd_signal)
-    bearish = ema8_last < ema21_last and ema21_slope < 0 and (macd_hist <= 0 or macd_line[-1] < macd_signal)
+    ema_bull = ema8_last > ema21_last and ema21_slope > 0
+    ema_bear = ema8_last < ema21_last and ema21_slope < 0
+    macd_bull = macd_hist >= 0 or macd_line[-1] > macd_signal
+    macd_bear = macd_hist <= 0 or macd_line[-1] < macd_signal
+    macd_hard = bucket in policy["macd_hard_dtes"]
+
+    if macd_hard:
+        bullish = ema_bull and macd_bull
+        bearish = ema_bear and macd_bear
+    else:
+        bullish = ema_bull
+        bearish = ema_bear
+    macd_soft_mismatch = (bullish and not macd_bull) or (bearish and not macd_bear)
     rows.append(
         _pass("Bullish regime", f"EMA8 {ema8_last:.2f} > EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
         if bullish
@@ -236,6 +367,12 @@ def evaluate_two_dte_credit_spread(
         if bearish
         else _fail("Bearish regime", f"EMA8 {ema8_last:.2f}, EMA21 {ema21_last:.2f}, slope {ema21_slope:+.4f}", required=False)
     )
+    if not macd_hard:
+        rows.append(
+            _fail("MACD mismatch (soft)", f"MACD disagrees with EMA/slope direction; penalty={policy['macd_soft_penalty']:.2f}", required=False)
+            if macd_soft_mismatch
+            else _pass("MACD mismatch (soft)", "MACD agrees or no directional regime conflict.", required=False)
+        )
 
     iv_atm = _compute_atm_iv(options_2dte, spot, selected_dte)
     if iv_atm is None or iv_atm <= 0:
@@ -266,16 +403,26 @@ def evaluate_two_dte_credit_spread(
 
     direction = "NONE"
     z_threshold = float(cfg["z_threshold"])
-    if bullish and signed_z <= -z_threshold:
+    if bullish and not bearish:
         direction = "BULL_PUT"
-    elif bearish and signed_z >= z_threshold:
+    elif bearish and not bullish:
         direction = "BEAR_CALL"
 
-    rows.append(
-        _pass("Std-dev channel edge", f"z={signed_z:+.2f}, threshold ±{z_threshold:.2f}")
-        if direction != "NONE"
-        else _fail("Std-dev channel edge", f"z={signed_z:+.2f}, threshold ±{z_threshold:.2f}")
-    )
+    z_edge_ok = False
+    if direction == "BULL_PUT":
+        z_edge_ok = signed_z <= -z_threshold
+    elif direction == "BEAR_CALL":
+        z_edge_ok = signed_z >= z_threshold
+    z_penalty = float(policy["z_edge_penalty_by_dte"].get(bucket, 0.0))
+
+    if direction == "NONE":
+        rows.append(_fail("Std-dev channel edge", f"z={signed_z:+.2f}, threshold ±{z_threshold:.2f}"))
+    elif z_edge_ok:
+        rows.append(_pass("Std-dev channel edge", f"z={signed_z:+.2f}, threshold ±{z_threshold:.2f}"))
+    elif policy["z_edge_mode"] == "hard":
+        rows.append(_fail("Std-dev channel edge", f"z={signed_z:+.2f}, threshold ±{z_threshold:.2f}"))
+    else:
+        rows.append(_fail("Std-dev channel edge", f"SOFT FAIL: Z-edge not met (soft): z={signed_z:+.2f}, threshold ±{z_threshold:.2f} -> penalty={z_penalty:.2f}", required=False))
 
     mmc_direction = direction if direction in {"BULL_PUT", "BEAR_CALL"} else ("BULL_PUT" if signed_z <= 0 else "BEAR_CALL")
     mmc = _measured_move_completion_pass(
@@ -287,7 +434,7 @@ def evaluate_two_dte_credit_spread(
         macd_hist_prev=macd_hist_prev,
         direction=mmc_direction,
         dte=int(cfg_key),
-        z_threshold_map=Z_THRESHOLD_MAP,
+        z_threshold_map=policy["z_threshold_map"],
         mmc_stretch_map=MMC_STRETCH_MAP,
         prev_spot=prev_close,
         prev_ema20=ema20_prev,
@@ -336,6 +483,41 @@ def evaluate_two_dte_credit_spread(
             ),
         )
 
+    if policy["z_edge_mode"] == "hard" and not z_edge_ok:
+        return _result(
+            False,
+            "No trade: directional regime + zscore edge not aligned.",
+            rows,
+            None,
+            _metrics_payload(
+                {
+                    "ema8": ema8_last,
+                    "ema20": ema20_last,
+                    "ema21": ema21_last,
+                    "ema21_slope": ema21_slope,
+                    "macd_hist": macd_hist,
+                    "macd_hist_prev": macd_hist_prev,
+                    "zscore": signed_z,
+                    "z_edge_ok": z_edge_ok,
+                    "z_edge_mode": policy["z_edge_mode"],
+                    "z_edge_penalty": 0.0,
+                    "iv_atm": iv_atm,
+                    "em_1sd": em_1sd,
+                    "support": support,
+                    "resistance": resistance,
+                    "direction": direction,
+                    "measured_move": measured_move,
+                    "measured_ratio": measured_ratio,
+                    "measuredMoveCompletion": mmc["stretch"],
+                    "measuredMovePass": mmc["pass"],
+                    "measuredMoveDetail": mmc_detail,
+                },
+                cfg_key,
+                target_dte,
+                selected_dte,
+            ),
+        )
+
     if settings.require_measured_move and not mmc["pass"]:
         return _result(
             False,
@@ -351,6 +533,9 @@ def evaluate_two_dte_credit_spread(
                     "macd_hist": macd_hist,
                     "macd_hist_prev": macd_hist_prev,
                     "zscore": signed_z,
+                    "z_edge_ok": z_edge_ok,
+                    "z_edge_mode": policy["z_edge_mode"],
+                    "z_edge_penalty": 0.0 if z_edge_ok else (z_penalty if policy["z_edge_mode"] == "soft" else 0.0),
                     "iv_atm": iv_atm,
                     "em_1sd": em_1sd,
                     "support": support,
@@ -371,7 +556,8 @@ def evaluate_two_dte_credit_spread(
     width_choices = _width_choices(cfg, em_1sd)
     rows.append(_pass("Width rule", f"choices={width_choices}"))
 
-    candidates = _collect_vertical_candidates(
+    theta_epsilon = 0.0 if selected_dte <= 7 else float(policy["theta_epsilon_long_dte"])
+    candidates, candidate_meta = _collect_vertical_candidates(
         direction=direction,
         options=options_2dte,
         expiration=expiration_2dte,
@@ -381,10 +567,31 @@ def evaluate_two_dte_credit_spread(
         cfg=cfg,
         support=support,
         resistance=resistance,
+        selected_dte=selected_dte,
+        theta_epsilon=theta_epsilon,
+    )
+    rows.append(
+        _pass(
+            "S/R buffer scaling",
+            f"base={candidate_meta['sr_buffer_base']:.2f}, scaled={candidate_meta['sr_buffer_scaled']:.2f}, factor={candidate_meta['sr_buffer_factor']:.2f}",
+            required=False,
+        )
+    )
+    rows.append(
+        _pass(
+            "Theta gate",
+            f"selected_dte={selected_dte}, threshold net_theta >= {theta_epsilon:+.4f}",
+            required=False,
+        )
     )
 
     if not candidates:
-        rows.append(_fail("Spread candidate", "No spread matched delta/EM/width/credit/theta constraints."))
+        rows.append(
+            _fail(
+                "Spread candidate",
+                f"No spread matched delta/EM/width/credit/theta constraints. S/R buffer base={candidate_meta['sr_buffer_base']:.2f}, scaled={candidate_meta['sr_buffer_scaled']:.2f}.",
+            )
+        )
         return _result(
             False,
             f"No {target_dte}-DTE spread matched strict criteria.",
@@ -399,10 +606,16 @@ def evaluate_two_dte_credit_spread(
                     "macd_hist": macd_hist,
                     "macd_hist_prev": macd_hist_prev,
                     "zscore": signed_z,
+                    "z_edge_ok": z_edge_ok,
+                    "z_edge_mode": policy["z_edge_mode"],
+                    "z_edge_penalty": 0.0 if z_edge_ok else (z_penalty if policy["z_edge_mode"] == "soft" else 0.0),
                     "iv_atm": iv_atm,
                     "em_1sd": em_1sd,
                     "support": support,
                     "resistance": resistance,
+                    "sr_buffer_base": candidate_meta["sr_buffer_base"],
+                    "sr_buffer_scaled": candidate_meta["sr_buffer_scaled"],
+                    "sr_buffer_factor": candidate_meta["sr_buffer_factor"],
                     "direction": direction,
                     "measured_move": measured_move,
                     "measured_ratio": measured_ratio,
@@ -416,7 +629,16 @@ def evaluate_two_dte_credit_spread(
             ),
         )
 
-    best = _rank_candidates(candidates, cfg, selected_dte)
+    best = _rank_candidates(
+        candidates,
+        cfg,
+        selected_dte,
+        z_edge_ok=z_edge_ok,
+        z_edge_mode=policy["z_edge_mode"],
+        z_edge_penalty=z_penalty,
+        macd_soft_mismatch=macd_soft_mismatch and not macd_hard,
+        macd_soft_penalty=float(policy["macd_soft_penalty"]),
+    )
 
     profit_take_pct = float(cfg["profit_take_pct_credit"])
     profit_take_debit = best["credit"] * (1.0 - profit_take_pct)
@@ -438,9 +660,86 @@ def evaluate_two_dte_credit_spread(
     }
 
     rows.append(_pass("Candidate selected", f"{best['type']} | Δ {best['short_delta']:+.3f} | width {best['width']}"))
+    max_rel_strike_distance = _env_float("SPX0DTE_MAX_REL_STRIKE_DISTANCE", 0.08)
+    max_abs_strike_distance = _env_float("SPX0DTE_MAX_ABS_STRIKE_DISTANCE", 600.0)
+    short_strike = float(best["short_strike"])
+    abs_distance = abs(short_strike - float(spot))
+    rel_distance = abs_distance / max(float(spot), 1e-9)
+    strike_sanity_ok = rel_distance <= max_rel_strike_distance and abs_distance <= max_abs_strike_distance
+    rows.append(
+        _pass(
+            "Strike sanity",
+            f"spot={spot:.2f}, short={short_strike:.2f}, rel={rel_distance:.4f}, abs={abs_distance:.2f}",
+        )
+        if strike_sanity_ok
+        else _fail(
+            "Strike sanity",
+            f"spot={spot:.2f}, short={short_strike:.2f}, rel={rel_distance:.4f}, abs={abs_distance:.2f}, limits(rel<={max_rel_strike_distance:.4f}, abs<={max_abs_strike_distance:.2f})",
+        )
+    )
+    if not strike_sanity_ok:
+        return _result(
+            False,
+            (
+                "BLOCKED: Strike/spot mismatch "
+                f"(spot={spot:.2f}, short={short_strike:.2f}, rel={rel_distance:.4f}, "
+                f"chain_ts={chain_timestamp_iso or 'n/a'}, spot_ts={spot_timestamp_iso or 'n/a'})"
+            ),
+            rows,
+            None,
+            _metrics_payload(
+                {
+                    "spot_ts": spot_timestamp_iso,
+                    "chain_ts": chain_timestamp_iso,
+                    "greeks_ts": greeks_timestamp_iso,
+                    "strike_abs_distance": abs_distance,
+                    "strike_rel_distance": rel_distance,
+                },
+                cfg_key,
+                target_dte,
+                selected_dte,
+            ),
+        )
+
+    right = "P" if direction == "BULL_PUT" else "C"
+    by_key = {(o.right, round(o.strike, 4), o.expiration): o for o in options_2dte}
+    short_key = (right, round(float(best["short_strike"]), 4), expiration_2dte)
+    long_key = (right, round(float(best["long_strike"]), 4), expiration_2dte)
+    leg_presence_ok = short_key in by_key and long_key in by_key
+    rows.append(
+        _pass(
+            "Leg presence",
+            f"Both legs found in chain for expiry {expiration_2dte.isoformat()} ({right}).",
+        )
+        if leg_presence_ok
+        else _fail(
+            "Leg presence",
+            f"Missing leg in chain for expiry {expiration_2dte.isoformat()} ({right}).",
+        )
+    )
+    if not leg_presence_ok:
+        return _result(
+            False,
+            "BLOCKED: Leg not found in chain.",
+            rows,
+            None,
+            _metrics_payload(
+                {
+                    "spot_ts": spot_timestamp_iso,
+                    "chain_ts": chain_timestamp_iso,
+                    "greeks_ts": greeks_timestamp_iso,
+                },
+                cfg_key,
+                target_dte,
+                selected_dte,
+            ),
+        )
+
     rows.append(_pass("Credit/width band", f"{best['credit_pct']:.3f} in [{cfg['credit_pct_width'][0]:.2f}, {cfg['credit_pct_width'][1]:.2f}]"))
-    rows.append(_pass("Spread net theta > 0", f"net_theta={best['net_theta']:+.4f}"))
+    rows.append(_pass("Spread net theta", f"net_theta={best['net_theta']:+.4f}, threshold={theta_epsilon:+.4f}"))
     rows.append(_pass("Spread Greeks", f"Δ {best['net_delta']:+.4f}, Γ {best['net_gamma']:+.6f}, Θ {best['net_theta']:+.4f}, ν {best['net_vega']:+.4f}"))
+    if best.get("soft_penalty_total", 0.0) > 0:
+        rows.append(_fail("Soft penalties", f"SOFT FAIL aggregate penalty applied: {best['soft_penalty_total']:.2f}", required=False))
 
     recommendation = {
         **best,
@@ -475,10 +774,16 @@ def evaluate_two_dte_credit_spread(
             "macd_hist": macd_hist,
             "macd_hist_prev": macd_hist_prev,
             "zscore": signed_z,
+            "z_edge_ok": z_edge_ok,
+            "z_edge_mode": policy["z_edge_mode"],
+            "z_edge_penalty": 0.0 if z_edge_ok else (z_penalty if policy["z_edge_mode"] == "soft" else 0.0),
             "iv_atm": iv_atm,
             "em_1sd": em_1sd,
             "support": support,
             "resistance": resistance,
+            "sr_buffer_base": candidate_meta["sr_buffer_base"],
+            "sr_buffer_scaled": candidate_meta["sr_buffer_scaled"],
+            "sr_buffer_factor": candidate_meta["sr_buffer_factor"],
             "direction": direction,
             "measured_move": measured_move,
             "measured_ratio": measured_ratio,
@@ -490,6 +795,10 @@ def evaluate_two_dte_credit_spread(
             "net_theta": best["net_theta"],
             "net_vega": best["net_vega"],
             "sd_multiple": best["sd_multiple"],
+            "rank_score": best.get("rank_score"),
+            "soft_penalty_total": best.get("soft_penalty_total"),
+            "macd_soft_penalty_applied": best.get("penalty_macd", 0.0),
+            "z_soft_penalty_applied": best.get("penalty_z", 0.0),
         },
         cfg_key,
         target_dte,
@@ -519,11 +828,12 @@ def _metrics_payload(base: dict[str, Any], cfg_key: str, target_dte: int, select
     return payload
 
 
-def _config_for_target(target_dte: int) -> tuple[str, dict[str, Any]]:
-    keys = sorted(int(k) for k in CONFIG.keys())
+def _config_for_target(target_dte: int, config: Optional[dict[str, dict[str, Any]]] = None) -> tuple[str, dict[str, Any]]:
+    source = config if config is not None else CONFIG_STRICT
+    keys = sorted(int(k) for k in source.keys())
     nearest = min(keys, key=lambda k: abs(k - int(target_dte)))
     key = str(nearest)
-    return key, CONFIG[key]
+    return key, source[key]
 
 
 def _compute_atm_iv(options: Sequence[OptionSnapshot], spot: float, dte: int) -> Optional[float]:
@@ -636,16 +946,20 @@ def _collect_vertical_candidates(
     cfg: dict[str, Any],
     support: Optional[float],
     resistance: Optional[float],
-) -> list[dict[str, Any]]:
+    selected_dte: int,
+    theta_epsilon: float,
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
     if direction not in {"BULL_PUT", "BEAR_CALL"}:
-        return []
+        return [], {"sr_buffer_base": 0.0, "sr_buffer_scaled": 0.0, "sr_buffer_factor": 1.0}
 
     right = "P" if direction == "BULL_PUT" else "C"
     abs_delta_min, abs_delta_max = [float(v) for v in cfg["short_abs_delta_band"]]
     dist_min_em, dist_max_em = [float(v) for v in cfg["strike_dist_vs_em"]]
     sd_min, sd_max = [float(v) for v in cfg["target_sd_multiple"]]
     credit_pct_min, credit_pct_max = [float(v) for v in cfg["credit_pct_width"]]
-    sr_buffer = float(cfg["sr_buffer_em_mult"]) * em_1sd
+    sr_buffer_base = float(cfg["sr_buffer_em_mult"]) * em_1sd
+    sr_buffer_factor = float(SR_BUFFER_MULT_BY_DTE.get(int(selected_dte), 1.0))
+    sr_buffer = sr_buffer_base * sr_buffer_factor
 
     by_key = {(o.right, round(o.strike, 4), o.expiration): o for o in options}
     shorts = [o for o in options if o.expiration == expiration and o.right == right and o.mid is not None and o.delta is not None]
@@ -703,7 +1017,7 @@ def _collect_vertical_candidates(
             net_gamma = -float(short.gamma) + float(long_leg.gamma)
             net_theta = -float(short.theta) + float(long_leg.theta)
             net_vega = -float(short.vega) + float(long_leg.vega)
-            if net_theta <= 0:
+            if net_theta < float(theta_epsilon):
                 continue
 
             max_loss_points = float(width) - credit
@@ -762,25 +1076,61 @@ def _collect_vertical_candidates(
                     ],
                 }
             )
-    return candidates
+    return candidates, {
+        "sr_buffer_base": float(sr_buffer_base),
+        "sr_buffer_scaled": float(sr_buffer),
+        "sr_buffer_factor": float(sr_buffer_factor),
+    }
 
 
-def _rank_candidates(candidates: list[dict[str, Any]], cfg: dict[str, Any], selected_dte: int) -> dict[str, Any]:
+def _rank_candidates(
+    candidates: list[dict[str, Any]],
+    cfg: dict[str, Any],
+    selected_dte: int,
+    *,
+    z_edge_ok: bool,
+    z_edge_mode: str,
+    z_edge_penalty: float,
+    macd_soft_mismatch: bool,
+    macd_soft_penalty: float,
+) -> dict[str, Any]:
     delta_mid = (float(cfg["short_abs_delta_band"][0]) + float(cfg["short_abs_delta_band"][1])) / 2.0
+    for candidate in candidates:
+        delta_fit = abs(abs(float(candidate["short_delta"])) - delta_mid)
+        credit_component = -float(candidate["credit_pct"])
+        gamma_component = abs(float(candidate["net_gamma"])) if selected_dte <= 14 else 0.0
+        base_rank_score = delta_fit + credit_component + gamma_component
+
+        penalty_z = float(z_edge_penalty) if (z_edge_mode == "soft" and not z_edge_ok) else 0.0
+        penalty_macd = float(macd_soft_penalty) if bool(macd_soft_mismatch) else 0.0
+        soft_penalty_total = penalty_z + penalty_macd
+        rank_score = base_rank_score + soft_penalty_total
+
+        candidate["base_rank_score"] = float(base_rank_score)
+        candidate["penalty_z"] = float(penalty_z)
+        candidate["penalty_macd"] = float(penalty_macd)
+        candidate["soft_penalty_total"] = float(soft_penalty_total)
+        candidate["rank_score"] = float(rank_score)
 
     if selected_dte <= 14:
         candidates.sort(
             key=lambda c: (
+                float(c.get("rank_score", 0.0)),
                 abs(abs(float(c["short_delta"])) - delta_mid),
                 -float(c["credit_pct"]),
                 abs(float(c["net_gamma"])),
+                float(c["short_strike"]),
+                float(c["long_strike"]),
             )
         )
     else:
         candidates.sort(
             key=lambda c: (
+                float(c.get("rank_score", 0.0)),
                 abs(abs(float(c["short_delta"])) - delta_mid),
                 -float(c["credit_pct"]),
+                float(c["short_strike"]),
+                float(c["long_strike"]),
             )
         )
     return candidates[0]

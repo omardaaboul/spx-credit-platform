@@ -138,6 +138,60 @@ Session policy is controlled with:
 ```bash
 SIMULATION_MODE=false
 ALLOW_SIM_ALERTS=false
+
+### Balanced Preset (Strategy Gating)
+
+Multi-DTE credit spreads now support a preset toggle:
+
+```bash
+STRATEGY_PRESET=balanced   # default
+# or
+STRATEGY_PRESET=strict
+```
+
+Z-edge behavior is also configurable:
+
+```bash
+Z_EDGE_MODE=soft   # default in balanced preset
+# or
+Z_EDGE_MODE=hard
+```
+
+Behavior summary:
+- `balanced` keeps protections but converts z-edge into a soft penalty by default.
+- `strict` preserves strict profile behavior and defaults z-edge to hard gating.
+- You can force hard z-edge regardless of preset via `Z_EDGE_MODE=hard`.
+
+### Snapshot Header and Data Integrity Guards
+
+`/api/spx0dte` now carries a strict snapshot-header contract so strategy alerts cannot fire on inconsistent chain data:
+
+- `dataFeeds.underlying_price.timestampIso`
+- `dataFeeds.option_chain.timestampIso`
+- `dataFeeds.greeks.timestampIso`
+- `symbolValidation.targets["2"|"7"|"14"|"30"|"45"].expiration`
+- `symbolValidation.chain.{underlyingSymbol,chainExpiryMin,chainExpiryMax,expirationsPresent}`
+- `symbolValidation.checks.{spot_reasonable,chain_has_target_expirations,greeks_match_chain,spot_age_ok,chain_age_ok,greeks_age_ok}`
+
+Hard integrity blocks are applied for:
+- selected expiry missing from chain
+- recommendation legs not found in chain symbol set
+- strike/spot mismatch beyond configured sanity thresholds
+- greeks missing or stale/mismatched on READY candidates
+
+Freshness SLAs are environment-configurable:
+
+```bash
+SPX0DTE_SPOT_MAX_AGE_S=20
+SPX0DTE_CHAIN_MAX_AGE_S=60
+SPX0DTE_GREEKS_MAX_AGE_S=60
+SPX0DTE_MAX_REL_STRIKE_DISTANCE=0.08
+SPX0DTE_MAX_ABS_STRIKE_DISTANCE=600
+```
+
+`STRICT_LIVE_BLOCKS` semantics are preserved:
+- `true`: stale required feeds can hard-block readiness in live session.
+- `false`: stale-feed contract warnings are non-blocking, but chain/strike/leg integrity blocks still prevent READY alerts.
 STRICT_LIVE_BLOCKS=true
 FEATURE_0DTE=false
 ```

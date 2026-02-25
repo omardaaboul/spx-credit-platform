@@ -1126,6 +1126,32 @@ function buildUnavailablePayload(message: string): SnapshotWithWarnings {
     openTrades: [],
     priceSeries: [],
     volSeries: [],
+    symbolValidation: {
+      dte0: [],
+      dte2: [],
+      bwb: [],
+      targets: {
+        "2": { expiration: null, symbols: [] },
+        "7": { expiration: null, symbols: [] },
+        "14": { expiration: null, symbols: [] },
+        "30": { expiration: null, symbols: [] },
+        "45": { expiration: null, symbols: [] },
+      },
+      chain: {
+        underlyingSymbol: "SPX",
+        chainExpiryMin: null,
+        chainExpiryMax: null,
+        expirationsPresent: [],
+      },
+      checks: {
+        spot_reasonable: false,
+        chain_has_target_expirations: false,
+        greeks_match_chain: false,
+        chain_age_ok: false,
+        spot_age_ok: false,
+        greeks_age_ok: false,
+      },
+    },
     warnings: [message],
     twoDte: {
       ready: false,
@@ -2569,6 +2595,188 @@ function applyEntryDebounce(payload: DashboardPayload): DashboardPayload {
     ...payload,
     alerts,
     warnings,
+  };
+}
+
+function withStrategyChecklistRow(
+  candidate: DashboardPayload["candidates"][number],
+  row: { name: string; status: "pass" | "fail" | "blocked" | "na"; detail: string; required?: boolean },
+): DashboardPayload["candidates"][number] {
+  const checklist = candidate.checklist ?? { global: [], regime: [], strategy: [] };
+  return {
+    ...candidate,
+    checklist: {
+      ...checklist,
+      strategy: [...(checklist.strategy ?? []), row],
+    },
+  };
+}
+
+function blockCandidateWithReason(
+  candidate: DashboardPayload["candidates"][number],
+  reason: string,
+  rowName: string,
+): DashboardPayload["candidates"][number] {
+  const next = withStrategyChecklistRow(candidate, {
+    name: rowName,
+    status: "fail",
+    detail: reason,
+    required: true,
+  });
+  return {
+    ...next,
+    ready: false,
+    blockedReason: reason,
+    reason,
+  };
+}
+
+function applySnapshotHeaderIntegrityGuards(payload: DashboardPayload, ctx: ReqCtx): DashboardPayload {
+  const raw = (payload.symbolValidation ?? null) as Record<string, unknown> | null;
+  if (!raw) return payload;
+  const chain = (raw.chain ?? {}) as Record<string, unknown>;
+  const checks = (raw.checks ?? {}) as Record<string, unknown>;
+  const targets = (raw.targets ?? {}) as Record<string, unknown>;
+  const expirationsPresent = new Set<string>(
+    Array.isArray(chain.expirationsPresent) ? chain.expirationsPresent.map((v) => String(v)) : [],
+  );
+  const spot = Number(payload.metrics?.spx ?? Number.NaN);
+  const maxRel = Number(process.env.SPX0DTE_MAX_REL_STRIKE_DISTANCE ?? 0.08);
+  const maxAbs = Number(process.env.SPX0DTE_MAX_ABS_STRIKE_DISTANCE ?? 600);
+
+  const marketNeedsFreshness = Boolean(
+    payload.market.isOpen &&
+      (payload.data_mode === "LIVE" || payload.data_mode === "DELAYED" || payload.market.source.startsWith("tastytrade-")),
+  );
+  const spotAgeOk = checks.spot_age_ok === true;
+  const chainAgeOk = checks.chain_age_ok === true;
+  const greeksAgeOk = checks.greeks_age_ok === true;
+  const greeksMatchChain = checks.greeks_match_chain === true;
+
+  let candidates = payload.candidates.map((candidate) => {
+    const dteMatch = String(candidate.strategy).match(/(\d+)-DTE/i);
+    const targetDte = dteMatch ? Number(dteMatch[1]) : null;
+    let next = candidate;
+
+    const shortLeg = (candidate.legs ?? []).find((leg) => leg.action === "SELL");
+    if (candidate.ready && Number.isFinite(spot) && shortLeg && Number.isFinite(shortLeg.strike)) {
+      const absDistance = Math.abs(shortLeg.strike - spot);
+      const relDistance = absDistance / Math.max(Math.abs(spot), 1e-9);
+      if (relDistance > maxRel || absDistance > maxAbs) {
+        const reason = `BLOCKED: Strike/spot mismatch (spot=${spot.toFixed(2)}, short=${shortLeg.strike.toFixed(2)}, rel=${relDistance.toFixed(4)}, chain_ts=${payload.dataFeeds?.option_chain?.timestampIso ?? "n/a"}, spot_ts=${payload.dataFeeds?.underlying_price?.timestampIso ?? "n/a"})`;
+        debugLog(ctx, "integrity_block", {
+          target_dte: targetDte,
+          selected_expiry: null,
+          short_strike: shortLeg.strike,
+          long_strike: (candidate.legs ?? []).find((leg) => leg.action === "BUY")?.strike ?? null,
+          spot,
+          rel_distance: relDistance,
+          spot_ts: payload.dataFeeds?.underlying_price?.timestampIso ?? null,
+          chain_ts: payload.dataFeeds?.option_chain?.timestampIso ?? null,
+          greeks_ts: payload.dataFeeds?.greeks?.timestampIso ?? null,
+          data_mode: payload.data_mode ?? null,
+          reason: "strike_sanity",
+        });
+        next = blockCandidateWithReason(next, reason, "Strike sanity");
+      }
+    }
+
+    if (targetDte != null && Number.isFinite(targetDte)) {
+      const targetNode = (targets[String(targetDte)] ?? {}) as Record<string, unknown>;
+      const selectedExpiry = typeof targetNode.expiration === "string" ? targetNode.expiration : null;
+      if (next.ready && selectedExpiry && !expirationsPresent.has(selectedExpiry)) {
+        const reason = `BLOCKED: Chain missing selected expiry ${selectedExpiry} for target ${targetDte}`;
+        debugLog(ctx, "integrity_block", {
+          target_dte: targetDte,
+          selected_expiry: selectedExpiry,
+          short_strike: (next.legs ?? []).find((leg) => leg.action === "SELL")?.strike ?? null,
+          long_strike: (next.legs ?? []).find((leg) => leg.action === "BUY")?.strike ?? null,
+          spot,
+          rel_distance: null,
+          spot_ts: payload.dataFeeds?.underlying_price?.timestampIso ?? null,
+          chain_ts: payload.dataFeeds?.option_chain?.timestampIso ?? null,
+          greeks_ts: payload.dataFeeds?.greeks?.timestampIso ?? null,
+          data_mode: payload.data_mode ?? null,
+          reason: "missing_selected_expiry",
+        });
+        next = blockCandidateWithReason(next, reason, "Chain expiry presence");
+      }
+
+      const symbols = new Set(
+        Array.isArray(targetNode.symbols) ? targetNode.symbols.map((v) => String(v).toUpperCase()) : [],
+      );
+      if (next.ready && symbols.size > 0) {
+        const missing = (next.legs ?? [])
+          .map((leg) => String(leg.symbol ?? "").toUpperCase())
+          .filter((sym) => sym && !symbols.has(sym));
+        if (missing.length > 0) {
+          const reason = `BLOCKED: Leg not found in chain (${missing.slice(0, 2).join(", ")})`;
+          debugLog(ctx, "integrity_block", {
+            target_dte: targetDte,
+            selected_expiry: selectedExpiry,
+            short_strike: (next.legs ?? []).find((leg) => leg.action === "SELL")?.strike ?? null,
+            long_strike: (next.legs ?? []).find((leg) => leg.action === "BUY")?.strike ?? null,
+            spot,
+            rel_distance: null,
+            spot_ts: payload.dataFeeds?.underlying_price?.timestampIso ?? null,
+            chain_ts: payload.dataFeeds?.option_chain?.timestampIso ?? null,
+            greeks_ts: payload.dataFeeds?.greeks?.timestampIso ?? null,
+            data_mode: payload.data_mode ?? null,
+            reason: "missing_leg_symbol",
+          });
+          next = blockCandidateWithReason(next, reason, "Leg presence");
+        }
+      }
+    }
+
+    if (next.ready) {
+      const greek = next.greeks ?? {};
+      const haveLegGreeks =
+        Number.isFinite(Number(greek.delta)) &&
+        Number.isFinite(Number(greek.gamma)) &&
+        Number.isFinite(Number(greek.theta)) &&
+        Number.isFinite(Number(greek.vega));
+      if (!haveLegGreeks || (marketNeedsFreshness && (!greeksAgeOk || !greeksMatchChain))) {
+        const reason = !haveLegGreeks
+          ? "BLOCKED: Greeks missing for one or more legs."
+          : "BLOCKED: Greeks feed stale/mismatched for selected legs.";
+        debugLog(ctx, "integrity_block", {
+          target_dte: targetDte,
+          selected_expiry: null,
+          short_strike: (next.legs ?? []).find((leg) => leg.action === "SELL")?.strike ?? null,
+          long_strike: (next.legs ?? []).find((leg) => leg.action === "BUY")?.strike ?? null,
+          spot,
+          rel_distance: null,
+          spot_ts: payload.dataFeeds?.underlying_price?.timestampIso ?? null,
+          chain_ts: payload.dataFeeds?.option_chain?.timestampIso ?? null,
+          greeks_ts: payload.dataFeeds?.greeks?.timestampIso ?? null,
+          data_mode: payload.data_mode ?? null,
+          reason: "greeks_inconsistent",
+        });
+        next = blockCandidateWithReason(next, reason, "Greeks consistency");
+      }
+    }
+
+    return next;
+  });
+
+  if (marketNeedsFreshness && STRICT_LIVE_BLOCKS && (!spotAgeOk || !chainAgeOk || !greeksAgeOk)) {
+    const issue = `BLOCKED: feed freshness failed (spot_age_ok=${spotAgeOk}, chain_age_ok=${chainAgeOk}, greeks_age_ok=${greeksAgeOk})`;
+    candidates = candidates.map((candidate) => blockCandidateWithReason(candidate, issue, "Snapshot feed freshness"));
+  }
+
+  return {
+    ...payload,
+    candidates,
+    strategyEligibility: (payload.strategyEligibility ?? []).map((row) => {
+      const candidate = candidates.find((c) => c.strategy === row.strategy);
+      if (!candidate) return row;
+      return {
+        ...row,
+        status: candidate.ready ? "pass" : "fail",
+        reason: candidate.ready ? row.reason : (candidate.blockedReason || row.reason),
+      };
+    }),
   };
 }
 
@@ -5033,6 +5241,7 @@ export async function GET(request: Request) {
     },
   };
   payload = withDataModeAndAges(payload, marketClosedOverride);
+  payload = applySnapshotHeaderIntegrityGuards(payload, ctx);
   const decision = evaluateDecision(buildDecisionInput(payload));
   payload = {
     ...payload,

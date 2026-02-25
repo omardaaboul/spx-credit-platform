@@ -131,4 +131,33 @@ describe("data contract", () => {
     expect(rows[0].status).toBe("fail");
     expect(rows[0].detail).toBe("Threshold failed with fresh data.");
   });
+
+  it("marks stale chain as degraded in live session", () => {
+    const staleIso = new Date(Date.now() - 120_000).toISOString();
+    const nowIso = new Date().toISOString();
+    const payload = basePayload();
+    payload.market.isOpen = true;
+    payload.dataFeeds = {
+      underlying_price: { value: 5000, timestampIso: nowIso, source: "live" },
+      option_chain: { value: 200, timestampIso: staleIso, source: "live" },
+      greeks: { value: 180, timestampIso: nowIso, source: "live" },
+      intraday_candles: { value: 60, timestampIso: nowIso, source: "live" },
+      vwap: { value: 4998, timestampIso: nowIso, source: "derived" },
+      atr_1m_5: { value: 4.2, timestampIso: nowIso, source: "derived" },
+      realized_range_15m: { value: 6.5, timestampIso: nowIso, source: "derived" },
+      expected_move: { value: 24.8, timestampIso: nowIso, source: "derived" },
+      regime: { value: "CHOP", timestampIso: nowIso, source: "derived" },
+    };
+    const result = evaluateDataContract(payload);
+    expect(result.status).toBe("degraded");
+    expect(result.feeds.option_chain.isValid).toBe(false);
+  });
+
+  it("keeps contract inactive when market is closed (fixture/historical mode)", () => {
+    const payload = basePayload();
+    payload.market.isOpen = false;
+    const result = evaluateDataContract(payload);
+    expect(result.status).toBe("inactive");
+    expect(result.issues).toEqual([]);
+  });
 });

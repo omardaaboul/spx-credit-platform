@@ -198,6 +198,32 @@ export type DashboardPayload = {
       }
     >;
   };
+  symbolValidation?: {
+    dte0?: string[];
+    dte2?: string[];
+    bwb?: string[];
+    targets?: Record<
+      string,
+      {
+        expiration: string | null;
+        symbols?: string[];
+      }
+    >;
+    chain?: {
+      underlyingSymbol: string;
+      chainExpiryMin: string | null;
+      chainExpiryMax: string | null;
+      expirationsPresent: string[];
+    };
+    checks?: {
+      spot_reasonable: boolean;
+      chain_has_target_expirations: boolean;
+      greeks_match_chain: boolean;
+      chain_age_ok: boolean;
+      spot_age_ok: boolean;
+      greeks_age_ok: boolean;
+    };
+  };
   metrics: MetricSnapshot;
   candidates: CandidateCard[];
   globalChecklist?: ChecklistItem[];

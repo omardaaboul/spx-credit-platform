@@ -272,19 +272,115 @@ def _symbol_validation_payload(snapshot) -> dict:
         out = sorted({str(getattr(o, "option_symbol", "")).strip() for o in rows if getattr(o, "option_symbol", None)})
         return [s for s in out if s]
 
+    def _parse_iso(value: object) -> Optional[dt.datetime]:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            return dt.datetime.fromisoformat(value)
+        except Exception:
+            return None
+
+    def _infer_underlying_symbol() -> str:
+        counts: dict[str, int] = {}
+        for row in [*snapshot.options, *snapshot.options_2dte, *snapshot.options_bwb]:
+            sym = str(getattr(row, "option_symbol", "")).strip().upper()
+            root = sym.split(" ", 1)[0] if sym else ""
+            if not root:
+                continue
+            counts[root] = counts.get(root, 0) + 1
+        if not counts:
+            return "SPX"
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
+
+    now_iso = dt.datetime.now(tz=ET).isoformat()
+    quote_ts_iso = now_iso
+    chain_ts_iso = quote_ts_iso if snapshot.options else None
+    greeks_count = sum(
+        1
+        for o in snapshot.options
+        if o.delta is not None or o.gamma is not None or o.theta is not None
+    )
+    greeks_ts_iso = quote_ts_iso if greeks_count > 0 else None
+
+    spot_max_age_s = _env_float("SPX0DTE_SPOT_MAX_AGE_S", 20.0)
+    chain_max_age_s = _env_float("SPX0DTE_CHAIN_MAX_AGE_S", 60.0)
+    greeks_max_age_s = _env_float("SPX0DTE_GREEKS_MAX_AGE_S", 60.0)
+    now_dt = dt.datetime.now(tz=ET)
+
+    def _age_ok(ts_iso: Optional[str], max_age_s: float) -> bool:
+        ts = _parse_iso(ts_iso)
+        if ts is None:
+            return False
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=ET)
+        age_s = (now_dt - ts.astimezone(ET)).total_seconds()
+        return age_s >= 0 and age_s <= max_age_s
+
+    target_keys = [2, 7, 14, 30, 45]
     targets: dict[str, dict[str, object]] = {}
-    for target_dte, rows in sorted((snapshot.options_by_target_dte or {}).items(), key=lambda item: int(item[0])):
+    for target_dte in target_keys:
+        rows = (snapshot.options_by_target_dte or {}).get(target_dte, [])
         exp = (snapshot.expirations_by_target_dte or {}).get(target_dte)
         targets[str(int(target_dte))] = {
             "expiration": exp.isoformat() if isinstance(exp, dt.date) else None,
             "symbols": _symbols(rows),
         }
 
+    expirations_present_set: set[str] = set()
+    for exp in (snapshot.expirations_by_target_dte or {}).values():
+        if isinstance(exp, dt.date):
+            expirations_present_set.add(exp.isoformat())
+    if isinstance(snapshot.expiration_2dte, dt.date):
+        expirations_present_set.add(snapshot.expiration_2dte.isoformat())
+    if isinstance(snapshot.expiration_bwb, dt.date):
+        expirations_present_set.add(snapshot.expiration_bwb.isoformat())
+    for row in [*snapshot.options, *snapshot.options_2dte, *snapshot.options_bwb]:
+        exp = getattr(row, "expiration", None)
+        if isinstance(exp, dt.date):
+            expirations_present_set.add(exp.isoformat())
+
+    expirations_present = sorted(expirations_present_set)
+    chain_expiry_min = expirations_present[0] if expirations_present else None
+    chain_expiry_max = expirations_present[-1] if expirations_present else None
+
+    spot_value = _to_float(snapshot.spot)
+    spot_reasonable = spot_value is not None and 2500.0 <= spot_value <= 8000.0
+    chain_has_target_expirations = all(
+        isinstance((snapshot.expirations_by_target_dte or {}).get(k), dt.date) for k in target_keys
+    )
+
+    chain_symbols = set(_symbols(snapshot.options))
+    greeks_symbols = {
+        str(getattr(o, "option_symbol", "")).strip()
+        for o in snapshot.options
+        if getattr(o, "option_symbol", None) and (
+            getattr(o, "delta", None) is not None
+            or getattr(o, "gamma", None) is not None
+            or getattr(o, "theta", None) is not None
+            or getattr(o, "vega", None) is not None
+        )
+    }
+    greeks_match_chain = len(greeks_symbols) > 0 and greeks_symbols.issubset(chain_symbols)
+
     return {
         "dte0": _symbols(snapshot.options),
         "dte2": _symbols(snapshot.options_2dte),
         "bwb": _symbols(snapshot.options_bwb),
         "targets": targets,
+        "chain": {
+            "underlyingSymbol": _infer_underlying_symbol(),
+            "chainExpiryMin": chain_expiry_min,
+            "chainExpiryMax": chain_expiry_max,
+            "expirationsPresent": expirations_present,
+        },
+        "checks": {
+            "spot_reasonable": bool(spot_reasonable),
+            "chain_has_target_expirations": bool(chain_has_target_expirations),
+            "greeks_match_chain": bool(greeks_match_chain),
+            "chain_age_ok": bool(_age_ok(chain_ts_iso, chain_max_age_s)),
+            "spot_age_ok": bool(_age_ok(quote_ts_iso if spot_value is not None else None, spot_max_age_s)),
+            "greeks_age_ok": bool(_age_ok(greeks_ts_iso, greeks_max_age_s)),
+        },
     }
 
 
@@ -1892,6 +1988,22 @@ def main() -> None:
         trend_slope_points_per_min=trend_slope,
         widths=[10, 15, 20],
     )
+    quote_ts_iso = now_et.isoformat()
+    chain_ts_iso = quote_ts_iso if snapshot.options else None
+    greek_count_now = sum(
+        1
+        for o in snapshot.options
+        if o.delta is not None or o.gamma is not None or o.theta is not None or o.vega is not None
+    )
+    greeks_ts_iso = quote_ts_iso if greek_count_now > 0 else None
+    chain_expirations_present = [
+        exp
+        for exp in (snapshot.expirations_by_target_dte or {}).values()
+        if isinstance(exp, dt.date)
+    ]
+    if isinstance(snapshot.expiration_2dte, dt.date):
+        chain_expirations_present.append(snapshot.expiration_2dte)
+
     two_dte_settings = _load_two_dte_settings()
     two_dte_raw = evaluate_two_dte_credit_spread(
         spot=snapshot.spot,
@@ -1903,6 +2015,10 @@ def main() -> None:
         target_dte=2,
         catalyst_blocked=macro_block,
         catalyst_detail=macro_detail,
+        chain_expirations_present=chain_expirations_present,
+        spot_timestamp_iso=quote_ts_iso if snapshot.spot is not None else None,
+        chain_timestamp_iso=chain_ts_iso,
+        greeks_timestamp_iso=greeks_ts_iso,
     )
     multi_dte_targets = [2, 7, 14, 30, 45]
     multi_dte_raw: list[dict] = []
@@ -1923,6 +2039,10 @@ def main() -> None:
                 target_dte=target_dte,
                 catalyst_blocked=macro_block,
                 catalyst_detail=macro_detail,
+                chain_expirations_present=chain_expirations_present,
+                spot_timestamp_iso=quote_ts_iso if snapshot.spot is not None else None,
+                chain_timestamp_iso=chain_ts_iso,
+                greeks_timestamp_iso=greeks_ts_iso,
             )
 
         selected_dte = None
@@ -2048,17 +2168,12 @@ def main() -> None:
     if warnings:
         source = "tastytrade-partial"
 
-    quote_ts_iso = now_et.isoformat()
     last_candle_ts_iso = (
         session_candles[-1].timestamp.astimezone(ET).isoformat()
         if session_candles
         else None
     )
-    greek_count = sum(
-        1
-        for o in snapshot.options
-        if o.delta is not None or o.gamma is not None or o.theta is not None
-    )
+    greek_count = greek_count_now
     data_feeds = {
         "underlying_price": {
             "value": _to_float(snapshot.spot),
