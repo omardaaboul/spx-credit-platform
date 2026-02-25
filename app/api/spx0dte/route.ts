@@ -5341,14 +5341,15 @@ export async function GET(request: Request) {
   await maybeSendTelegramAlerts(payload.alerts, canSendOperationalAlerts);
 
   const durationMs = Date.now() - ctx.startedAtMs;
+  const responsePayload = ensureSnapshotHeaderShape(payload);
   debugLog(ctx, "request_end", {
     status: 200,
     duration_ms: durationMs,
-    market_source: payload.market?.source ?? "unknown",
-    candidate_count: payload.candidates.length,
-    alert_count: payload.alerts.length,
+    market_source: responsePayload.market?.source ?? "unknown",
+    candidate_count: responsePayload.candidates.length,
+    alert_count: responsePayload.alerts.length,
   });
-  return NextResponse.json(payload, {
+  return NextResponse.json(responsePayload, {
     status: 200,
     headers: {
       "x-request-id": ctx.requestId,
