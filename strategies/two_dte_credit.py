@@ -643,10 +643,21 @@ def evaluate_two_dte_credit_spread(
     )
 
     if not candidates:
+        reject_counts = candidate_meta.get("reject_counts", {}) if isinstance(candidate_meta, dict) else {}
+        ranked_rejects = sorted(
+            [(str(k), int(v)) for k, v in reject_counts.items() if isinstance(v, (int, float)) and int(v) > 0],
+            key=lambda row: row[1],
+            reverse=True,
+        )
+        top_rejects = ", ".join(f"{name}={count}" for name, count in ranked_rejects[:3]) if ranked_rejects else "none"
         rows.append(
             _fail(
                 "Spread candidate",
-                f"No spread matched delta/EM/width/credit/theta constraints. S/R buffer base={candidate_meta['sr_buffer_base']:.2f}, scaled={candidate_meta['sr_buffer_scaled']:.2f}.",
+                (
+                    "No spread matched delta/EM/width/credit/theta constraints. "
+                    f"S/R buffer base={candidate_meta['sr_buffer_base']:.2f}, scaled={candidate_meta['sr_buffer_scaled']:.2f}. "
+                    f"Top rejects: {top_rejects}."
+                ),
             )
         )
         return _result(
@@ -673,6 +684,7 @@ def evaluate_two_dte_credit_spread(
                     "sr_buffer_base": candidate_meta["sr_buffer_base"],
                     "sr_buffer_scaled": candidate_meta["sr_buffer_scaled"],
                     "sr_buffer_factor": candidate_meta["sr_buffer_factor"],
+                    "spreadRejectCounts": candidate_meta.get("reject_counts", {}),
                     "direction": direction,
                     "measured_move": measured_move,
                     "measured_ratio": measured_ratio,
@@ -1021,31 +1033,52 @@ def _collect_vertical_candidates(
     by_key = {(o.right, round(o.strike, 4), o.expiration): o for o in options}
     shorts = [o for o in options if o.expiration == expiration and o.right == right and o.mid is not None and o.delta is not None]
 
+    reject_counts: dict[str, int] = {
+        "delta_band": 0,
+        "wrong_side_spot": 0,
+        "sr_buffer": 0,
+        "dist_vs_em": 0,
+        "sd_multiple": 0,
+        "long_leg_missing": 0,
+        "credit_nonpositive": 0,
+        "credit_pct": 0,
+        "liquidity": 0,
+        "greeks_missing": 0,
+        "theta": 0,
+        "max_loss": 0,
+    }
     candidates: list[dict[str, Any]] = []
     for short in shorts:
         abs_delta = abs(float(short.delta))
         if abs_delta < abs_delta_min or abs_delta > abs_delta_max:
+            reject_counts["delta_band"] += 1
             continue
 
         if right == "P":
             if short.strike >= spot:
+                reject_counts["wrong_side_spot"] += 1
                 continue
             dist = spot - short.strike
             if support is not None and not (short.strike < (support - sr_buffer)):
+                reject_counts["sr_buffer"] += 1
                 continue
         else:
             if short.strike <= spot:
+                reject_counts["wrong_side_spot"] += 1
                 continue
             dist = short.strike - spot
             if resistance is not None and not (short.strike > (resistance + sr_buffer)):
+                reject_counts["sr_buffer"] += 1
                 continue
 
         if em_1sd <= 0:
             continue
         sd_multiple = dist / em_1sd
         if not (dist_min_em * em_1sd <= dist <= dist_max_em * em_1sd):
+            reject_counts["dist_vs_em"] += 1
             continue
         if not (sd_min <= sd_multiple <= sd_max):
+            reject_counts["sd_multiple"] += 1
             continue
 
         for width in widths:
@@ -1054,20 +1087,25 @@ def _collect_vertical_candidates(
             long_strike = short.strike - width if right == "P" else short.strike + width
             long_leg = by_key.get((right, round(long_strike, 4), expiration))
             if long_leg is None or long_leg.mid is None or long_leg.delta is None:
+                reject_counts["long_leg_missing"] += 1
                 continue
 
             credit = float(short.mid) - float(long_leg.mid)
             if credit <= 0:
+                reject_counts["credit_nonpositive"] += 1
                 continue
             credit_pct = credit / float(width)
             if credit_pct < credit_pct_min or credit_pct > credit_pct_max:
+                reject_counts["credit_pct"] += 1
                 continue
 
             liq = _liq_ratio(short, long_leg)
             if liq is None or liq > 0.30:
+                reject_counts["liquidity"] += 1
                 continue
 
             if any(v is None for v in (short.delta, short.gamma, short.theta, short.vega, long_leg.delta, long_leg.gamma, long_leg.theta, long_leg.vega)):
+                reject_counts["greeks_missing"] += 1
                 continue
 
             net_delta = -float(short.delta) + float(long_leg.delta)
@@ -1075,10 +1113,12 @@ def _collect_vertical_candidates(
             net_theta = -float(short.theta) + float(long_leg.theta)
             net_vega = -float(short.vega) + float(long_leg.vega)
             if net_theta < float(theta_epsilon):
+                reject_counts["theta"] += 1
                 continue
 
             max_loss_points = float(width) - credit
             if max_loss_points <= 0:
+                reject_counts["max_loss"] += 1
                 continue
 
             candidates.append(
@@ -1137,6 +1177,7 @@ def _collect_vertical_candidates(
         "sr_buffer_base": float(sr_buffer_base),
         "sr_buffer_scaled": float(sr_buffer),
         "sr_buffer_factor": float(sr_buffer_factor),
+        "reject_counts": reject_counts,
     }
 
 
