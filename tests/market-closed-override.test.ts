@@ -111,6 +111,7 @@ async function loadRouteWithMockedExec(snapshot: Record<string, unknown>) {
 }
 
 function expectSnapshotHeaderShape(payload: Record<string, unknown>) {
+  expect(Object.prototype.hasOwnProperty.call(payload, "dataFeeds")).toBe(true);
   expect(typeof payload.generatedAtEt).toBe("string");
   expect(typeof payload.generatedAtParis).toBe("string");
   expect(typeof payload.data_mode).toBe("string");

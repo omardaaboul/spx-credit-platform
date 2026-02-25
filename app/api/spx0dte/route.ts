@@ -3634,6 +3634,44 @@ function ensureSnapshotHeaderShape(payload: DashboardPayload): DashboardPayload 
   };
 }
 
+function finalizeResponsePayload(payload: DashboardPayload): Record<string, unknown> {
+  const shaped = ensureSnapshotHeaderShape(payload) as DashboardPayload & {
+    dataFeeds?: Record<string, unknown>;
+    symbolValidation?: Record<string, unknown>;
+  };
+  const out: Record<string, unknown> = {
+    ...(shaped as unknown as Record<string, unknown>),
+  };
+  // Absolute wire-level contract enforcement.
+  out.dataFeeds = shaped.dataFeeds ?? {
+    underlying_price: { timestampIso: null, source: shaped.market?.source ?? "unknown" },
+    option_chain: { timestampIso: null, source: shaped.market?.source ?? "unknown" },
+    greeks: { timestampIso: null, source: shaped.market?.source ?? "unknown" },
+  };
+  out.symbolValidation = shaped.symbolValidation ?? {
+    dte0: [],
+    dte2: [],
+    bwb: [],
+    targets: {
+      "2": { expiration: null, symbols: [] },
+      "7": { expiration: null, symbols: [] },
+      "14": { expiration: null, symbols: [] },
+      "30": { expiration: null, symbols: [] },
+      "45": { expiration: null, symbols: [] },
+    },
+    chain: { underlyingSymbol: "SPX", chainExpiryMin: null, chainExpiryMax: null, expirationsPresent: [] },
+    checks: {
+      spot_reasonable: false,
+      chain_has_target_expirations: false,
+      greeks_match_chain: false,
+      chain_age_ok: false,
+      spot_age_ok: false,
+      greeks_age_ok: false,
+    },
+  };
+  return out;
+}
+
 function allRequiredPass(
   rows: Array<{ status: "pass" | "fail" | "blocked" | "na"; required?: boolean }> | undefined,
 ): boolean {
@@ -5341,13 +5379,14 @@ export async function GET(request: Request) {
   await maybeSendTelegramAlerts(payload.alerts, canSendOperationalAlerts);
 
   const durationMs = Date.now() - ctx.startedAtMs;
-  const responsePayload = ensureSnapshotHeaderShape(payload);
+  const responsePayload = finalizeResponsePayload(payload);
+  const responseView = responsePayload as DashboardPayload;
   debugLog(ctx, "request_end", {
     status: 200,
     duration_ms: durationMs,
-    market_source: responsePayload.market?.source ?? "unknown",
-    candidate_count: responsePayload.candidates.length,
-    alert_count: responsePayload.alerts.length,
+    market_source: responseView.market?.source ?? "unknown",
+    candidate_count: responseView.candidates.length,
+    alert_count: responseView.alerts.length,
   });
   return NextResponse.json(responsePayload, {
     status: 200,
