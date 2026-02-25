@@ -31,23 +31,26 @@ jq_assert() {
   fi
 }
 
-check_key_exists() {
-  local key="$1"
-  jq_assert "haspath(${key})" 3 "Missing required key: ${key}"
-}
-
 # Check 1: schema presence
-check_key_exists "[\"generatedAtEt\"]"
-check_key_exists "[\"generatedAtParis\"]"
-check_key_exists "[\"data_mode\"]"
-check_key_exists "[\"market\",\"isOpen\"]"
-check_key_exists "[\"metrics\",\"spx\"]"
-check_key_exists "[\"dataFeeds\",\"underlying_price\",\"timestampIso\"]"
-check_key_exists "[\"dataFeeds\",\"option_chain\",\"timestampIso\"]"
-check_key_exists "[\"dataFeeds\",\"greeks\",\"timestampIso\"]"
-check_key_exists "[\"symbolValidation\",\"targets\"]"
-check_key_exists "[\"symbolValidation\",\"chain\",\"expirationsPresent\"]"
-check_key_exists "[\"symbolValidation\",\"checks\"]"
+jq_assert '
+  has("generatedAtEt")
+  and has("generatedAtParis")
+  and has("data_mode")
+  and (.market | type == "object" and has("isOpen"))
+  and (.metrics | type == "object" and has("spx"))
+  and (.dataFeeds | type == "object"
+      and has("underlying_price")
+      and has("option_chain")
+      and has("greeks")
+      and (.underlying_price | type == "object" and has("timestampIso"))
+      and (.option_chain | type == "object" and has("timestampIso"))
+      and (.greeks | type == "object" and has("timestampIso")))
+  and (.symbolValidation | type == "object"
+      and has("targets")
+      and has("chain")
+      and has("checks")
+      and (.chain | type == "object" and has("expirationsPresent")))
+' 3 "Missing required snapshot-header/schema keys"
 
 # Check 2: target keys
 jq_assert '.symbolValidation.targets | has("2") and has("7") and has("14") and has("30") and has("45")' 4 \
