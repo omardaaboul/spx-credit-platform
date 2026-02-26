@@ -160,7 +160,10 @@ export default function Spx0DtePage() {
   const directionalRegime = data?.regimeSummary?.regime ?? "-";
   const volRegime = data?.decision?.vol?.regime ?? "UNKNOWN";
   const volConfidence = data?.decision?.vol?.confidence ?? "LOW";
-  const volWarningText = (data?.decision?.vol?.warnings ?? []).slice(0, 2).join(" • ");
+  const volWarningText = (data?.decision?.vol?.warnings ?? [])
+    .filter((warning) => !/ATM IV/i.test(String(warning)))
+    .slice(0, 2)
+    .join(" • ");
   const dataMode = data?.data_mode ?? "-";
   const timeEt = data?.generatedAtEt ?? "--:--:--";
   const spot = safeNum(data?.metrics?.spx);

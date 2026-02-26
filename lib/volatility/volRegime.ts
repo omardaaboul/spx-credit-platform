@@ -108,7 +108,7 @@ export function classifyVolRegime(
   const ivAtm = ivDecimal(finite(input.iv_atm));
   if (ivAtm == null) {
     missingInputs.push("iv_atm");
-    warnings.push("ATM IV is missing.");
+    warnings.push("ATM IV unavailable (common off-hours or when data is delayed).");
     return {
       regime: "UNKNOWN",
       features: {
