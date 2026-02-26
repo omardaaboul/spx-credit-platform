@@ -32,10 +32,10 @@ def find_iron_condor_candidate(
     criteria.append(_criterion("Condor widths selected", True, f"Widths {list(widths)}"))
 
     by_key = {(o.right, round(o.strike, 4)): o for o in options}
-    puts = [o for o in options if o.right == "P" and o.delta is not None and -0.18 <= o.delta <= -0.12]
-    calls = [o for o in options if o.right == "C" and o.delta is not None and 0.12 <= o.delta <= 0.18]
-    criteria.append(_criterion("Short put delta in [-0.18, -0.12]", bool(puts), f"{len(puts)} candidates"))
-    criteria.append(_criterion("Short call delta in [0.12, 0.18]", bool(calls), f"{len(calls)} candidates"))
+    puts = [o for o in options if o.right == "P" and o.delta is not None and -0.25 <= o.delta <= -0.08]
+    calls = [o for o in options if o.right == "C" and o.delta is not None and 0.08 <= o.delta <= 0.25]
+    criteria.append(_criterion("Short put delta in [-0.25, -0.08]", bool(puts), f"{len(puts)} candidates"))
+    criteria.append(_criterion("Short call delta in [0.08, 0.25]", bool(calls), f"{len(calls)} candidates"))
 
     if not puts:
         reasons.append("No short put in delta band [-0.18, -0.12].")
@@ -45,10 +45,10 @@ def find_iron_condor_candidate(
         return _not_ready(reasons, criteria)
 
     pairs = [(sp, sc) for sp in puts for sc in calls]
-    symmetry_pairs = [(sp, sc) for sp, sc in pairs if abs(abs(sp.delta) - sc.delta) <= 0.03]
+    symmetry_pairs = [(sp, sc) for sp, sc in pairs if abs(abs(sp.delta) - sc.delta) <= 0.06]
     criteria.append(
         _criterion(
-            "Delta symmetry abs(|put|-call) <= 0.03",
+            "Delta symmetry abs(|put|-call) <= 0.06",
             bool(symmetry_pairs),
             f"{len(symmetry_pairs)}/{len(pairs)} pairs",
         )
@@ -57,11 +57,11 @@ def find_iron_condor_candidate(
     distance_pairs = [
         (sp, sc)
         for sp, sc in symmetry_pairs
-        if (spot - sp.strike) >= (1.2 * emr) and (sc.strike - spot) >= (1.2 * emr)
+        if (spot - sp.strike) >= (1.0 * emr) and (sc.strike - spot) >= (1.0 * emr)
     ]
     criteria.append(
         _criterion(
-            "Short strikes >= 1.2 * EMR from spot",
+            "Short strikes >= 1.0 * EMR from spot",
             bool(distance_pairs),
             f"{len(distance_pairs)}/{len(symmetry_pairs)} pairs",
         )
@@ -70,7 +70,7 @@ def find_iron_condor_candidate(
     liquid_pairs = [(sp, sc) for sp, sc in distance_pairs if _is_liquid(sp) and _is_liquid(sc)]
     criteria.append(
         _criterion(
-            "Short-leg liquidity (spread/mid <= 0.12)",
+            "Short-leg liquidity (spread/mid <= 0.18)",
             bool(liquid_pairs),
             f"{len(liquid_pairs)}/{len(distance_pairs)} pairs",
         )
@@ -93,7 +93,7 @@ def find_iron_condor_candidate(
             credit = float(sp.mid + sc.mid - lp.mid - lc.mid)
             if credit <= 0:
                 continue
-            if credit < 0.03 * width:
+            if credit < 0.02 * width:
                 continue
 
             max_loss_points = width - credit
@@ -153,7 +153,7 @@ def find_iron_condor_candidate(
     )
     criteria.append(
         _criterion(
-            "Credit filter (credit >= 0.03 * width)",
+            "Credit filter (credit >= 0.02 * width)",
             credit_pass_count > 0,
             f"{credit_pass_count} structures passed",
         )
@@ -196,7 +196,7 @@ def _spread_ratio(option: OptionSnapshot) -> float:
 
 
 def _is_liquid(option: OptionSnapshot) -> bool:
-    return _spread_ratio(option) <= 0.12
+    return _spread_ratio(option) <= 0.18
 
 
 def _price_based_pop_condor(

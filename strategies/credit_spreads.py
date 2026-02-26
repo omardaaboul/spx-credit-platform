@@ -16,15 +16,15 @@ def find_directional_credit_spread_candidate(
     trend_slope_points_per_min: Optional[float],
     range_15m: Optional[float],
     widths: Sequence[int],
-    trend_slope_threshold: float = 0.2,
-    max_range_emr_ratio: float = 0.40,
-    short_put_delta_min: float = -0.25,
-    short_put_delta_max: float = -0.20,
-    short_call_delta_min: float = 0.20,
-    short_call_delta_max: float = 0.25,
-    min_credit_per_width: float = 0.05,
-    min_pop: float = 0.75,
-    max_liquidity_ratio: float = 0.12,
+    trend_slope_threshold: float = 0.12,
+    max_range_emr_ratio: float = 0.55,
+    short_put_delta_min: float = -0.30,
+    short_put_delta_max: float = -0.12,
+    short_call_delta_min: float = 0.12,
+    short_call_delta_max: float = 0.30,
+    min_credit_per_width: float = 0.03,
+    min_pop: float = 0.60,
+    max_liquidity_ratio: float = 0.18,
 ) -> dict:
     reasons: list[str] = []
     criteria: list[dict] = []
@@ -44,12 +44,12 @@ def find_directional_credit_spread_candidate(
         return _not_ready(["No credit spread widths selected."], criteria)
     criteria.append(_criterion("Widths selected", True, f"Widths {list(widths)}"))
 
-    start = now_et.replace(hour=10, minute=0, second=0, microsecond=0)
-    end = now_et.replace(hour=13, minute=30, second=0, microsecond=0)
+    start = now_et.replace(hour=9, minute=45, second=0, microsecond=0)
+    end = now_et.replace(hour=14, minute=30, second=0, microsecond=0)
     pass_time = start <= now_et <= end
-    criteria.append(_criterion("Entry time 10:00-13:30 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
+    criteria.append(_criterion("Entry time 09:45-14:30 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
     if not pass_time:
-        reasons.append("Directional spread not allowed outside 10:00-13:30 ET.")
+        reasons.append("Directional spread not allowed outside 09:45-14:30 ET.")
 
     if trend_slope_points_per_min is None:
         criteria.append(_criterion("Trend slope available", False, "Insufficient candles"))

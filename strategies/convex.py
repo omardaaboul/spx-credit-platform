@@ -15,13 +15,13 @@ def find_convex_debit_spread_candidate(
     candles_1m: Sequence[CandleBar],
     trend_slope_points_per_min: Optional[float],
     widths: Sequence[int] = (10, 15, 20),
-    slope_threshold: float = 0.30,
-    expansion_ratio_15m: float = 0.45,
-    expansion_ratio_day: float = 0.60,
-    min_debit: float = 0.50,
-    max_debit: float = 1.50,
-    min_reward_to_risk: float = 1.50,
-    max_liquidity_ratio: float = 0.15,
+    slope_threshold: float = 0.20,
+    expansion_ratio_15m: float = 0.30,
+    expansion_ratio_day: float = 0.45,
+    min_debit: float = 0.25,
+    max_debit: float = 2.50,
+    min_reward_to_risk: float = 1.10,
+    max_liquidity_ratio: float = 0.25,
 ) -> dict:
     reasons: list[str] = []
     criteria: list[dict] = []
@@ -41,12 +41,12 @@ def find_convex_debit_spread_candidate(
         return _not_ready(["No debit spread widths selected."], criteria)
     criteria.append(_criterion("Debit spread widths selected", True, f"Widths {list(widths)}"))
 
-    start = now_et.replace(hour=10, minute=0, second=0, microsecond=0)
-    end = now_et.replace(hour=15, minute=0, second=0, microsecond=0)
+    start = now_et.replace(hour=9, minute=45, second=0, microsecond=0)
+    end = now_et.replace(hour=15, minute=30, second=0, microsecond=0)
     pass_time = start <= now_et <= end
-    criteria.append(_criterion("Entry time 10:00-15:00 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
+    criteria.append(_criterion("Entry time 09:45-15:30 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
     if not pass_time:
-        reasons.append("Convex debit spread only allowed 10:00-15:00 ET.")
+        reasons.append("Convex debit spread only allowed 09:45-15:30 ET.")
 
     if trend_slope_points_per_min is None:
         criteria.append(_criterion("Trend slope available", False, "Insufficient candles"))
@@ -128,13 +128,13 @@ def find_convex_debit_spread_candidate(
             for o in options
             if o.right == "C"
             and o.delta is not None
-            and 0.30 <= o.delta <= 0.60
+            and 0.25 <= o.delta <= 0.65
             and o.mid is not None
             and o.mid > 0
         ]
         criteria.append(
             _criterion(
-                "Long call delta in [0.30, 0.60]",
+                "Long call delta in [0.25, 0.65]",
                 bool(long_legs),
                 f"{len(long_legs)} candidates",
             )
@@ -164,13 +164,13 @@ def find_convex_debit_spread_candidate(
             for o in options
             if o.right == "P"
             and o.delta is not None
-            and -0.60 <= o.delta <= -0.30
+            and -0.65 <= o.delta <= -0.25
             and o.mid is not None
             and o.mid > 0
         ]
         criteria.append(
             _criterion(
-                "Long put delta in [-0.60, -0.30]",
+                "Long put delta in [-0.65, -0.25]",
                 bool(long_legs),
                 f"{len(long_legs)} candidates",
             )

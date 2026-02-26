@@ -36,39 +36,39 @@ def find_iron_fly_candidate(
         return _not_ready(["No fly widths selected."], criteria)
     criteria.append(_criterion("Fly widths selected", True, f"Widths {list(widths)}"))
 
-    cutoff = now_et.replace(hour=13, minute=0, second=0, microsecond=0)
+    cutoff = now_et.replace(hour=14, minute=30, second=0, microsecond=0)
     pass_time = now_et <= cutoff
-    criteria.append(_criterion("Entry time <= 13:00 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
+    criteria.append(_criterion("Entry time <= 14:30 ET", pass_time, now_et.strftime("%H:%M:%S ET")))
     if not pass_time:
-        reasons.append("Iron Fly not allowed after 13:00 ET.")
+        reasons.append("Iron Fly not allowed after 14:30 ET.")
 
-    pass_vwap = vwap_distance is not None and vwap_distance < 0.2 * emr
+    pass_vwap = vwap_distance is not None and vwap_distance < 0.35 * emr
     criteria.append(
         _criterion(
-            "|SPX - VWAP| < 0.2 * EMR",
+            "|SPX - VWAP| < 0.35 * EMR",
             pass_vwap,
-            f"{_fmt(vwap_distance)} < {_fmt(0.2 * emr)}",
+            f"{_fmt(vwap_distance)} < {_fmt(0.35 * emr)}",
         )
     )
     if not pass_vwap:
-        reasons.append("|SPX-VWAP| must be < 0.2 * EMR for fly.")
+        reasons.append("|SPX-VWAP| must be < 0.35 * EMR for fly.")
 
-    pass_range = range_15m is not None and range_15m < 0.25 * emr
+    pass_range = range_15m is not None and range_15m < 0.40 * emr
     criteria.append(
         _criterion(
-            "15m range < 0.25 * EMR",
+            "15m range < 0.40 * EMR",
             pass_range,
-            f"{_fmt(range_15m)} < {_fmt(0.25 * emr)}",
+            f"{_fmt(range_15m)} < {_fmt(0.40 * emr)}",
         )
     )
     if not pass_range:
-        reasons.append("15m range must be < 0.25 * EMR for fly.")
+        reasons.append("15m range must be < 0.40 * EMR for fly.")
 
-    pass_vix = vix_change_pct is None or vix_change_pct <= 3.0
-    vix_detail = "- (ignored)" if vix_change_pct is None else f"{vix_change_pct:+.2f}% <= +3.00%"
-    criteria.append(_criterion("VIX change <= +3% (if available)", pass_vix, vix_detail))
+    pass_vix = vix_change_pct is None or vix_change_pct <= 5.0
+    vix_detail = "- (ignored)" if vix_change_pct is None else f"{vix_change_pct:+.2f}% <= +5.00%"
+    criteria.append(_criterion("VIX change <= +5% (if available)", pass_vix, vix_detail))
     if not pass_vix:
-        reasons.append("VIX change must be <= +3% for fly.")
+        reasons.append("VIX change must be <= +5% for fly.")
 
     if reasons:
         return _not_ready(reasons, criteria)
@@ -98,13 +98,13 @@ def find_iron_fly_candidate(
     pass_liquidity = _is_liquid(short_call) and _is_liquid(short_put)
     criteria.append(
         _criterion(
-            "ATM short-leg liquidity (spread/mid <= 0.12)",
+            "ATM short-leg liquidity (spread/mid <= 0.18)",
             pass_liquidity,
             f"ratio {_fmt(max(_spread_ratio(short_put), _spread_ratio(short_call)))}",
         )
     )
     if not pass_liquidity:
-        return _not_ready(["ATM short legs failed liquidity gate ((ask-bid)/mid <= 0.12)."], criteria)
+        return _not_ready(["ATM short legs failed liquidity gate ((ask-bid)/mid <= 0.18)."], criteria)
 
     candidates: list[dict] = []
     structure_count = 0
@@ -202,7 +202,7 @@ def _spread_ratio(option: OptionSnapshot) -> float:
 
 
 def _is_liquid(option: OptionSnapshot) -> bool:
-    return _spread_ratio(option) <= 0.12
+    return _spread_ratio(option) <= 0.18
 
 
 def _price_based_pop_fly(

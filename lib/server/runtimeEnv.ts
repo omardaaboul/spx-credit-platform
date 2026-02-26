@@ -17,7 +17,7 @@ export function allowSimAlertsEnabled(): boolean {
 }
 
 export function feature0dteEnabled(): boolean {
-  return boolEnv("FEATURE_0DTE", false);
+  return boolEnv("FEATURE_0DTE", true);
 }
 
 export function telegramToken(): string {
