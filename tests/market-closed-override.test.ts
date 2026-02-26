@@ -104,7 +104,10 @@ function buildClosedSnapshot() {
 
 async function loadRouteWithMockedExec(snapshot: Record<string, unknown>) {
   vi.resetModules();
-  const execFileSync = vi.fn(() => JSON.stringify(snapshot));
+  const execFileSync = vi.fn((...args: unknown[]) => {
+    void args;
+    return JSON.stringify(snapshot);
+  });
   vi.doMock("node:child_process", () => ({ execFileSync }));
   const route = await import("@/app/api/spx0dte/route");
   return { GET: route.GET, execFileSync };

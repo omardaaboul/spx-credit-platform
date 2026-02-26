@@ -37,10 +37,11 @@ function loadProviderHealthState(): Required<ProviderHealthState> {
 export async function GET() {
   const issues = [...requiredEnvIssues()];
   const provider = loadProviderHealthState();
+  const providerDegraded = provider.provider_status === "down" || provider.auth_status === "failed" || provider.auth_status === "refreshing";
   if (provider.auth_status === "failed" && !issues.includes("TASTY_AUTH_FAILED")) {
     issues.push("TASTY_AUTH_FAILED");
   }
-  const status = issues.length > 0 ? "error" : "ok";
+  const status = issues.length > 0 ? "error" : providerDegraded ? "degraded" : "ok";
 
   return NextResponse.json(
     {

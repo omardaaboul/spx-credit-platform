@@ -120,8 +120,6 @@ export default function Spx0DtePage() {
   const candidateDte = useMemo(() => resolveCandidateDteContext(candidate, data), [candidate, data]);
   const candidateExpectedMove = useMemo(() => resolveCandidateExpectedMove(candidate, data), [candidate, data]);
   const candidateMeasuredMoveDetail = useMemo(() => resolveCandidateMeasuredMoveDetail(candidate, data), [candidate, data]);
-  const candidateZScore = useMemo(() => resolveCandidateZScore(candidate, data), [candidate, data]);
-  const candidateMmcPassed = useMemo(() => resolveCandidateMmcPassed(candidate, data), [candidate, data]);
   const openTrades = useMemo(
     () => (data?.openTrades ?? []).filter((trade) => trade.status === "OPEN" || trade.status === "EXIT_PENDING"),
     [data?.openTrades],
@@ -869,42 +867,6 @@ function resolveCandidateMeasuredMoveDetail(candidate: CandidateCard | null, dat
     (strategyDte > 0 ? targets.find((row) => row.target_dte === strategyDte) : undefined);
   const targetMetrics = (targetRow?.metrics ?? null) as Record<string, unknown> | null;
   return fromMetrics(targetMetrics) ?? "Waiting for enough bars + IV to compute measured move";
-}
-
-function resolveCandidateZScore(candidate: CandidateCard | null, data: DashboardPayload | null): number | null {
-  if (!candidate) return null;
-  if (candidate.strategy === "2-DTE Credit Spread") {
-    const rec = data?.twoDte?.recommendation as Record<string, unknown> | null | undefined;
-    const metrics = data?.twoDte?.metrics as Record<string, unknown> | undefined;
-    return toFiniteNumber(rec?.zscore) ?? toFiniteNumber(metrics?.zscore) ?? null;
-  }
-  const strategyDte = extractDteFromStrategy(candidate.strategy);
-  const targets = data?.multiDte?.targets ?? [];
-  const targetRow =
-    targets.find((row) => row.strategy_label === candidate.strategy) ??
-    (strategyDte > 0 ? targets.find((row) => row.target_dte === strategyDte) : undefined);
-  const rec = (targetRow?.recommendation ?? null) as Record<string, unknown> | null;
-  const metrics = (targetRow?.metrics ?? {}) as Record<string, unknown>;
-  return toFiniteNumber(rec?.zscore) ?? toFiniteNumber(metrics?.zscore) ?? null;
-}
-
-function resolveCandidateMmcPassed(candidate: CandidateCard | null, data: DashboardPayload | null): boolean | null {
-  if (!candidate) return null;
-  const row = (candidate.checklist?.strategy ?? []).find((item) => /measured move near completion/i.test(String(item.name)));
-  if (row?.status === "pass") return true;
-  if (row?.status === "fail" || row?.status === "blocked") return false;
-
-  if (candidate.strategy === "2-DTE Credit Spread") {
-    const metrics = data?.twoDte?.metrics as Record<string, unknown> | undefined;
-    return typeof metrics?.measuredMovePass === "boolean" ? metrics.measuredMovePass : null;
-  }
-  const strategyDte = extractDteFromStrategy(candidate.strategy);
-  const targets = data?.multiDte?.targets ?? [];
-  const targetRow =
-    targets.find((row) => row.strategy_label === candidate.strategy) ??
-    (strategyDte > 0 ? targets.find((row) => row.target_dte === strategyDte) : undefined);
-  const metrics = (targetRow?.metrics ?? {}) as Record<string, unknown>;
-  return typeof metrics?.measuredMovePass === "boolean" ? metrics.measuredMovePass : null;
 }
 
 function toIsoDate(value: unknown): string | null {
