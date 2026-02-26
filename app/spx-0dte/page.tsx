@@ -383,6 +383,33 @@ export default function Spx0DtePage() {
                   <Metric label="Slope" value={trend.slope == null ? "-" : `${trend.slope.toFixed(2)} pts/min`} />
                   <Metric label="Recommended" value={trend.recommended} />
                 </div>
+                <div className={styles.checklist}>
+                  {[
+                    {
+                      label: "Market open",
+                      ok: Boolean(data?.market?.isOpen),
+                    },
+                    {
+                      label: "Slope available",
+                      ok: extractSlope(data) != null,
+                    },
+                    {
+                      label: "Slope meets threshold",
+                      ok: extractSlope(data) != null && Math.abs(extractSlope(data) ?? 0) >= settings.slopeThreshold,
+                    },
+                    {
+                      label: "Directional regime known",
+                      ok: Boolean((data?.regimeSummary?.regime ?? "").toUpperCase().includes("TREND_")),
+                    },
+                  ].map((item) => (
+                    <div key={item.label} className={styles.checklistItem}>
+                      <span className={`${styles.checklistIcon} ${item.ok ? styles.checklistIconOk : styles.checklistIconOff}`}>
+                        {item.ok ? "✓" : "□"}
+                      </span>
+                      <span>{item.label}</span>
+                    </div>
+                  ))}
+                </div>
                 <p className={styles.small}>Slope threshold: {settings.slopeThreshold.toFixed(2)} pts/min</p>
               </section>
 
@@ -427,15 +454,22 @@ export default function Spx0DtePage() {
                   </>
                 ) : (
                   <>
-                    <p>No valid credit spread candidate at the moment.</p>
+                    <p className={styles.subheading}>No valid credit spread candidate yet.</p>
                     {candidateMeasuredMoveDetail && (
-                      <p className={styles.small}>Measured move: {candidateMeasuredMoveDetail}</p>
+                      <p className={styles.smallMuted}>Measured move: {candidateMeasuredMoveDetail}</p>
                     )}
-                    {reasons.slice(0, 3).map((reason) => (
-                      <p key={reason} className={styles.small}>
-                        • {reason}
-                      </p>
-                    ))}
+                    {reasons.length > 0 && (
+                      <>
+                        <p className={styles.small}>Why not ready</p>
+                        <div className={styles.chipList}>
+                          {reasons.slice(0, 3).map((reason) => (
+                            <span key={reason} className={styles.chip}>
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </section>
