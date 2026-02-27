@@ -114,8 +114,14 @@ export default function Spx0DtePage() {
     return () => window.clearInterval(id);
   }, [lastSuccessAtMs]);
 
+  const decisionMode = (data?.decisionMode ?? data?.decision?.decisionMode ?? "STRICT").toString().toUpperCase();
   const candidate = useMemo(() => pickPrimaryCreditCandidate(data), [data]);
-  const candidateIsReady = Boolean(candidate?.ready) && (data?.decision ? data.decision.status === "READY" : true);
+  const dataBlocked = data?.decision?.status === "BLOCKED";
+  const candidateAvailable = Boolean(candidate);
+  const candidateIsReady = decisionMode === "PROBABILISTIC"
+    ? candidateAvailable && !dataBlocked
+    : Boolean(candidate?.ready) && (data?.decision ? data.decision.status === "READY" : true);
+  const showCandidate = decisionMode === "PROBABILISTIC" ? candidateAvailable : candidateIsReady;
   const spread = useMemo(() => buildSpreadSummary(candidate), [candidate]);
   const candidateDte = useMemo(() => resolveCandidateDteContext(candidate, data), [candidate, data]);
   const candidateExpectedMove = useMemo(() => resolveCandidateExpectedMove(candidate, data), [candidate, data]);
@@ -124,6 +130,7 @@ export default function Spx0DtePage() {
     () => (data?.openTrades ?? []).filter((trade) => trade.status === "OPEN" || trade.status === "EXIT_PENDING"),
     [data?.openTrades],
   );
+  const alertDiagnostics = useMemo(() => data?.alertDiagnostics?.recent ?? [], [data?.alertDiagnostics]);
   const upcomingMacro = useMemo(
     () =>
       (data?.upcomingMacroEvents ?? [])
@@ -156,6 +163,11 @@ export default function Spx0DtePage() {
 
   const trend = useMemo(() => deriveTrend(data, settings.slopeThreshold), [data, settings.slopeThreshold]);
   const reasons = useMemo(() => extractBlockReasons(candidate, data), [candidate, data]);
+  const candidateWarnings = useMemo(() => {
+    const warnings = candidate?.warnings ?? [];
+    if (warnings.length > 0) return warnings;
+    return reasons;
+  }, [candidate?.warnings, reasons]);
   const gateNotice = useMemo(() => (data?.warnings ?? []).find((w) => /^Gate notice/i.test(String(w))), [data?.warnings]);
   const directionalRegime = data?.regimeSummary?.regime ?? "-";
   const volRegime = data?.decision?.vol?.regime ?? "UNKNOWN";
@@ -341,6 +353,10 @@ export default function Spx0DtePage() {
               {dataMode} • {timeEt} ET
             </strong>
           </div>
+          <div className={styles.regimeChip}>
+            <span className={styles.regimeChipLabel}>Decision Mode</span>
+            <strong>{decisionMode}</strong>
+          </div>
           {(volRegime === "UNKNOWN" || volConfidence === "LOW") && volWarningText && (
             <div className={styles.regimeWarning} title={volWarningText}>
               ⚠ {volWarningText}
@@ -415,7 +431,7 @@ export default function Spx0DtePage() {
 
               <section className={styles.card}>
                 <h2 className={styles.heading}>Credit Spread Candidate</h2>
-                {candidate && candidateIsReady ? (
+                {showCandidate && candidate ? (
                   <>
                     <div className={styles.grid2}>
                       <Metric label="Spread" value={spread.spreadLabel} />
@@ -429,11 +445,16 @@ export default function Spx0DtePage() {
                       />
                       <Metric label="Credit" value={candidateCredit(candidate).toFixed(2)} />
                       <Metric label="Width" value={`${candidate.width} pts`} />
-                      <Metric label="Max Loss" value={`$${Math.round(candidate.maxRisk).toLocaleString("en-US")}`} />
-                      <Metric label="POP" value={`${(candidate.popPct * 100).toFixed(1)}%`} />
+                      <Metric label="Max Profit" value={formatDollars(candidate.maxProfit)} />
+                      <Metric label="Max Loss" value={formatDollars(candidate.maxLoss ?? candidate.maxRisk)} />
+                      <Metric label="RoR" value={formatPct(candidate.ror, 2)} />
+                      <Metric label="PoP" value={formatPct(candidate.popPct, 1)} />
                     </div>
                     <p className={styles.small}>
-                      Breakeven: {formatBreakeven(spread.lowerBreakeven)} to {formatBreakeven(spread.upperBreakeven)}
+                      Breakeven: {formatBreakevenRange(candidate, spread)}
+                    </p>
+                    <p className={styles.small}>
+                      EV: {formatDollars(candidate.ev)} • EV/Risk: {formatPct(candidate.evRor, 2)}
                     </p>
                     {candidateDte && (
                       <p className={styles.small}>
@@ -445,9 +466,24 @@ export default function Spx0DtePage() {
                       <p className={styles.small}>Expected Move (1σ): {candidateExpectedMove.toFixed(2)} pts</p>
                     )}
                     {candidateMeasuredMoveDetail && (
-                      <p className={styles.small}>Measured move: {candidateMeasuredMoveDetail}</p>
+                      <p className={styles.smallMuted}>Measured move: {candidateMeasuredMoveDetail}</p>
                     )}
-                    <button className={styles.button} onClick={confirmEntry} disabled={entryState === "sending"}>
+                    {!candidateIsReady && dataBlocked && (
+                      <p className={styles.smallMuted}>Alerts blocked: data freshness/session policy.</p>
+                    )}
+                    {candidateWarnings.length > 0 && (
+                      <>
+                        <p className={styles.small}>Warnings</p>
+                        <div className={styles.chipList}>
+                          {candidateWarnings.slice(0, 4).map((reason) => (
+                            <span key={reason} className={styles.chip}>
+                              {reason}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    <button className={styles.button} onClick={confirmEntry} disabled={entryState === "sending" || dataBlocked}>
                       {entryState === "sending" ? "Submitting..." : "Confirm Entry"}
                     </button>
                     {entryMessage && <p className={styles.small}>{entryMessage}</p>}
@@ -473,6 +509,31 @@ export default function Spx0DtePage() {
                   </>
                 )}
               </section>
+
+              <section className={styles.card}>
+                <h2 className={styles.heading}>Alert Debugging &amp; Health</h2>
+                {alertDiagnostics.length === 0 ? (
+                  <p className={styles.smallMuted}>No alert diagnostics recorded yet.</p>
+                ) : (
+                  <div className={styles.alertDiagnostics}>
+                    {alertDiagnostics.slice(0, 8).map((row) => (
+                      <div key={`${row.tsIso}-${row.gateCode}`} className={styles.alertRow}>
+                        <div className={styles.alertMeta}>
+                          <span className={styles.alertTime}>{formatTimeEt(row.tsIso)}</span>
+                          <span className={styles.alertCode}>{row.gateCode}</span>
+                        </div>
+                        <div className={styles.alertMessage}>{row.gateMessage}</div>
+                        <div className={styles.alertStats}>
+                          <span>PoP: {formatPct(row.bestPop, 0)}</span>
+                          <span>RoR: {formatPct(row.bestRor, 2)}</span>
+                          <span>C/W: {formatPct(row.bestCreditPct, 2)}</span>
+                          <span>Mode: {row.decisionMode}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
 
             <section className={styles.card}>
@@ -486,6 +547,11 @@ export default function Spx0DtePage() {
                       <th>Trade ID</th>
                       <th>Type</th>
                       <th>Entry</th>
+                      <th>Max Profit</th>
+                      <th>Max Loss</th>
+                      <th>RoR</th>
+                      <th>Breakeven</th>
+                      <th>PoP</th>
                       <th>P/L %</th>
                       <th>Status</th>
                     </tr>
@@ -496,6 +562,11 @@ export default function Spx0DtePage() {
                         <td>{trade.id}</td>
                         <td>{trade.strategy}</td>
                         <td>{trade.entryEt}</td>
+                        <td>{formatDollars(trade.maxProfit)}</td>
+                        <td>{formatDollars(trade.maxLoss)}</td>
+                        <td>{formatPct(trade.ror, 2)}</td>
+                        <td>{formatBreakevenRangeTrade(trade)}</td>
+                        <td>{formatPct(trade.popPct, 0)}</td>
                         <td>{(trade.plPct * 100).toFixed(1)}%</td>
                         <td>{trade.status}</td>
                       </tr>
@@ -640,12 +711,16 @@ function Metric({ label, value }: { label: string; value: string }) {
 function pickPrimaryCreditCandidate(data: DashboardPayload | null): CandidateCard | null {
   const ranked = data?.decision?.ranked ?? [];
   if (ranked.length > 0) {
-    const rankedCredit = ranked.map((row) => row.candidate).find((candidate) => isCreditSpread(candidate));
+    const rankedCredit = ranked
+      .map((row) => row.candidate)
+      .find((candidate) => isCreditSpread(candidate) && candidate.hardBlockCode !== "INVALID_SPREAD_GEOMETRY");
     if (rankedCredit) return rankedCredit;
   }
 
   const list = data?.candidates ?? [];
-  const creditOnly = list.filter((candidate) => isCreditSpread(candidate));
+  const creditOnly = list.filter(
+    (candidate) => isCreditSpread(candidate) && candidate.hardBlockCode !== "INVALID_SPREAD_GEOMETRY",
+  );
   if (creditOnly.length === 0) return null;
   return creditOnly.find((candidate) => candidate.ready) ?? creditOnly[0];
 }
@@ -792,7 +867,8 @@ function extractDteFromStrategy(strategy?: string): number {
 
 function resolveCandidateDteContext(candidate: CandidateCard | null, data: DashboardPayload | null): CandidateDteContext | null {
   if (!candidate) return null;
-  if (!candidate.ready) return null;
+  const decisionMode = (data?.decisionMode ?? data?.decision?.decisionMode ?? "STRICT").toString().toUpperCase();
+  if (decisionMode !== "PROBABILISTIC" && !candidate.ready) return null;
 
   if (candidate.strategy === "2-DTE Credit Spread") {
     const expiry = toIsoDate(data?.twoDte?.recommendation?.expiry);
@@ -923,9 +999,62 @@ function formatNumber(value: number | null, digits = 2): string {
   return value.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+function formatPct(value: number | null | undefined, digits = 1): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(digits)}%`;
+}
+
+function formatDollars(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
 function formatBreakeven(value: number | null): string {
   if (value == null || !Number.isFinite(value)) return "-";
   return value.toFixed(2);
+}
+
+function formatBreakevenRange(candidate: CandidateCard, spread: SpreadSummary): string {
+  if (candidate.breakeven != null && Number.isFinite(candidate.breakeven)) {
+    return formatBreakeven(candidate.breakeven);
+  }
+  if (
+    candidate.breakevenLow != null &&
+    candidate.breakevenHigh != null &&
+    Number.isFinite(candidate.breakevenLow) &&
+    Number.isFinite(candidate.breakevenHigh)
+  ) {
+    return `${formatBreakeven(candidate.breakevenLow)} to ${formatBreakeven(candidate.breakevenHigh)}`;
+  }
+  if (spread.lowerBreakeven != null || spread.upperBreakeven != null) {
+    return `${formatBreakeven(spread.lowerBreakeven)} to ${formatBreakeven(spread.upperBreakeven)}`;
+  }
+  return "-";
+}
+
+function formatBreakevenRangeTrade(trade: DashboardPayload["openTrades"][number]): string {
+  if (trade.breakeven != null && Number.isFinite(trade.breakeven)) {
+    return formatBreakeven(trade.breakeven);
+  }
+  if (
+    trade.breakevenLow != null &&
+    trade.breakevenHigh != null &&
+    Number.isFinite(trade.breakevenLow) &&
+    Number.isFinite(trade.breakevenHigh)
+  ) {
+    return `${formatBreakeven(trade.breakevenLow)} to ${formatBreakeven(trade.breakevenHigh)}`;
+  }
+  return "-";
+}
+
+function formatTimeEt(tsIso: string): string {
+  const ms = Date.parse(tsIso);
+  if (!Number.isFinite(ms)) return tsIso;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(ms));
 }
 
 function asPositiveNumber(value: unknown, fallback: number): number {

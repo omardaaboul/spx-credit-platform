@@ -143,7 +143,13 @@ export default function CandidateCard({
           <div className="space-y-2 text-sm text-[var(--spx-muted)]">
           <div className="grid gap-2 sm:grid-cols-3">
             <Stat label="Width" value={candidate ? String(candidate.width) : "-"} />
-            <Stat label="POP" value={candidate ? `${(candidate.popPct * 100).toFixed(0)}%` : "-"} />
+            <Stat label="PoP" value={formatPct(candidate?.popPct, 0)} />
+            <Stat label="RoR" value={formatPct(candidate?.ror, 2)} />
+            <Stat label="Max Profit" value={formatDollars(candidate?.maxProfit)} />
+            <Stat label="Max Loss" value={formatDollars(candidate?.maxLoss)} />
+            <Stat label="Breakeven" value={formatBreakeven(candidate)} />
+            <Stat label="EV" value={formatDollars(candidate?.ev)} />
+            <Stat label="EV/Risk" value={formatPct(candidate?.evRor, 2)} />
             <Stat label="State" value={candidate?.ready ? "READY" : "PENDING"} />
           </div>
           {hiddenDetailLine && <p className="text-xs">{hiddenDetailLine}</p>}
@@ -203,4 +209,30 @@ function extractDte(strategy?: string): number {
 
 function fmt(value: number | undefined, decimals: number): string {
   return value == null || !Number.isFinite(value) ? "-" : value.toFixed(decimals);
+}
+
+function formatPct(value: number | null | undefined, decimals = 0): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function formatDollars(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatBreakeven(candidate: CandidateCardType | null | undefined): string {
+  if (!candidate) return "-";
+  if (candidate.breakeven != null && Number.isFinite(candidate.breakeven)) {
+    return candidate.breakeven.toFixed(2);
+  }
+  if (
+    candidate.breakevenLow != null &&
+    candidate.breakevenHigh != null &&
+    Number.isFinite(candidate.breakevenLow) &&
+    Number.isFinite(candidate.breakevenHigh)
+  ) {
+    return `${candidate.breakevenLow.toFixed(2)}–${candidate.breakevenHigh.toFixed(2)}`;
+  }
+  return "-";
 }

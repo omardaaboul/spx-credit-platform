@@ -46,7 +46,7 @@ export default function StrategyCard({ item }: StrategyCardProps) {
         {item.ready ? "READY TO TRADE" : `BLOCKED - ${blockedReason}`}
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+      <dl className="mt-4 grid grid-cols-2 gap-3 text-sm md:grid-cols-6">
         <div>
           <dt className="text-[var(--spx-muted)]">Width</dt>
           <dd className="font-medium text-[var(--spx-text)]">{item.width}</dd>
@@ -56,12 +56,20 @@ export default function StrategyCard({ item }: StrategyCardProps) {
           <dd className="font-medium text-[var(--spx-text)]">{item.credit.toFixed(2)}</dd>
         </div>
         <div>
-          <dt className="text-[var(--spx-muted)]">Max Risk</dt>
-          <dd className="font-medium text-[var(--spx-text)]">{item.maxRisk.toFixed(2)}</dd>
+          <dt className="text-[var(--spx-muted)]">Max Loss</dt>
+          <dd className="font-medium text-[var(--spx-text)]">{formatDollars(item.maxLoss ?? item.maxRisk)}</dd>
         </div>
         <div>
-          <dt className="text-[var(--spx-muted)]">POP</dt>
-          <dd className="font-medium text-[var(--spx-text)]">{(item.popPct * 100).toFixed(0)}%</dd>
+          <dt className="text-[var(--spx-muted)]">PoP</dt>
+          <dd className="font-medium text-[var(--spx-text)]">{formatPct(item.popPct, 0)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--spx-muted)]">RoR</dt>
+          <dd className="font-medium text-[var(--spx-text)]">{formatPct(item.ror, 2)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--spx-muted)]">Breakeven</dt>
+          <dd className="font-medium text-[var(--spx-text)]">{formatBreakeven(item)}</dd>
         </div>
       </dl>
 
@@ -116,6 +124,29 @@ export default function StrategyCard({ item }: StrategyCardProps) {
       )}
     </Panel>
   );
+}
+
+function formatPct(value: number | null | undefined, decimals = 0): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function formatDollars(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatBreakeven(item: CandidateCard): string {
+  if (item.breakeven != null && Number.isFinite(item.breakeven)) return item.breakeven.toFixed(2);
+  if (
+    item.breakevenLow != null &&
+    item.breakevenHigh != null &&
+    Number.isFinite(item.breakevenLow) &&
+    Number.isFinite(item.breakevenHigh)
+  ) {
+    return `${item.breakevenLow.toFixed(2)}–${item.breakevenHigh.toFixed(2)}`;
+  }
+  return "-";
 }
 
 function ChecklistSection({ title, rows, strategy }: { title: string; rows: ChecklistItem[]; strategy: string }) {

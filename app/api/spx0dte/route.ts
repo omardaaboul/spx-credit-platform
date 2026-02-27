@@ -4,11 +4,21 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import type { AlertItem, DashboardPayload, OpenTrade, OptionLeg, Strategy } from "@/lib/spx0dte";
-import type { DecisionInput } from "@/lib/contracts/decision";
+import type { DecisionInput, DecisionOutput } from "@/lib/contracts/decision";
 import { applyDataContractToRows, evaluateDataContract } from "@/lib/dataContract";
 import { evaluateDecision } from "@/lib/engine/evaluate";
 import { resolveDataMode } from "@/lib/engine/dataMode";
+import { rankCandidatesDeterministic } from "@/lib/engine/ranker";
 import { recordIvSample } from "@/lib/data/ivCache";
+import {
+  evaluateProbabilisticEligibility,
+  isCreditSpreadVerticalCandidate,
+  resolveCandidateCreditPct,
+  resolveCandidateRor,
+} from "@/lib/alerts/alertEligibility";
+import { attachCandidateMetrics } from "@/lib/options/candidateMetrics";
+import { computeIronPayoff, computeVerticalPayoff } from "@/lib/options/payoff";
+import { listAlertDecisions, recordAlertDecision } from "@/lib/server/alertDecisionStore";
 import {
   allowSimAlertsEnabled,
   feature0dteEnabled,
@@ -65,6 +75,18 @@ const ENABLE_GATE_NOTICE_ALERTS =
 const ENABLE_MACRO_ALERTS =
   String(process.env.SPX0DTE_ENABLE_MACRO_ALERTS ?? "true").toLowerCase() !== "false";
 const FEATURE_0DTE = feature0dteEnabled();
+const DECISION_MODE =
+  String(process.env.DECISION_MODE ?? "STRICT").toUpperCase() === "PROBABILISTIC" ? "PROBABILISTIC" : "STRICT";
+const PROB_MIN_POP = Number(process.env.PROB_MIN_POP ?? 0.55);
+const PROB_MIN_ROR = Number(process.env.PROB_MIN_ROR ?? 0.1);
+const PROB_MIN_CREDIT_PCT = Number(process.env.PROB_MIN_CREDIT_PCT ?? 0.08);
+const PROB_MAX_GAMMA_PENALTY = String(process.env.PROB_MAX_GAMMA_PENALTY ?? "true").toLowerCase() !== "false";
+const ALERTS_ENABLED = String(process.env.ALERTS_ENABLED ?? "true").toLowerCase() !== "false";
+const ALERTS_TEST_ON_STARTUP = String(process.env.ALERTS_TEST_ON_STARTUP ?? "false").toLowerCase() === "true";
+const ALERTS_HEARTBEAT_MINUTES = Math.max(5, Number(process.env.ALERTS_HEARTBEAT_MINUTES ?? 60));
+const ALERTS_SUMMARY_ON_NO_CANDIDATE =
+  String(process.env.ALERTS_SUMMARY_ON_NO_CANDIDATE ?? "false").toLowerCase() === "true";
+const BOOT_ID = randomUUID();
 
 type TelegramDedupeState = {
   sent_ids: string[];
@@ -84,6 +106,11 @@ type SystemAlertState = {
   lastMacroBlockSentAtIso?: string;
   macroBlockActivePreviously?: boolean;
   lastMacroNoticeDailyKey?: string;
+  lastAlertTestBootId?: string;
+  lastAlertTestSentAtIso?: string;
+  lastAlertSentAtIso?: string;
+  lastHeartbeatSentAtIso?: string;
+  lastNoAlertSummaryDate?: string;
 };
 
 type EntryDebounceState = {
@@ -2317,6 +2344,7 @@ function buildDecisionInput(payload: DashboardPayload): DecisionInput {
     simulationMode: Boolean(payload.market_closed_override),
     allowSimAlerts: ALLOW_SIM_ALERTS,
     strictLiveBlocks: STRICT_LIVE_BLOCKS,
+    decisionMode: DECISION_MODE,
     feature0dte: FEATURE_0DTE,
     freshnessAges: ages,
     freshnessPolicy,
@@ -2580,7 +2608,10 @@ function applyEntryDebounce(payload: DashboardPayload): DashboardPayload {
   for (const candidate of payload.candidates) {
     const key = `${candidate.strategy}|${legSignatureFromCandidate(candidate)}`;
     const prev = state.byKey[key];
-    const ready = Boolean(candidate.ready);
+    const ready =
+      DECISION_MODE === "PROBABILISTIC" && isCreditSpreadVerticalCandidate(candidate)
+        ? evaluateAlertEligibility(payload, candidate).ok
+        : Boolean(candidate.ready);
     const consecutiveReady = ready ? (prev?.consecutiveReady ?? 0) + 1 : 0;
     nextByKey[key] = {
       consecutiveReady,
@@ -2673,7 +2704,8 @@ function applySnapshotHeaderIntegrityGuards(payload: DashboardPayload, ctx: ReqC
     let next = candidate;
 
     const shortLeg = (candidate.legs ?? []).find((leg) => leg.action === "SELL");
-    if (candidate.ready && Number.isFinite(spot) && shortLeg && Number.isFinite(shortLeg.strike)) {
+    const shouldCheckIntegrity = DECISION_MODE === "PROBABILISTIC" ? true : candidate.ready;
+    if (shouldCheckIntegrity && Number.isFinite(spot) && shortLeg && Number.isFinite(shortLeg.strike)) {
       const absDistance = Math.abs(shortLeg.strike - spot);
       const relDistance = absDistance / Math.max(Math.abs(spot), 1e-9);
       if (relDistance > maxRel || absDistance > maxAbs) {
@@ -2698,7 +2730,7 @@ function applySnapshotHeaderIntegrityGuards(payload: DashboardPayload, ctx: ReqC
     if (targetDte != null && Number.isFinite(targetDte)) {
       const targetNode = (targets[String(targetDte)] ?? {}) as Record<string, unknown>;
       const selectedExpiry = typeof targetNode.expiration === "string" ? targetNode.expiration : null;
-      if (next.ready && selectedExpiry && !expirationsPresent.has(selectedExpiry)) {
+      if (shouldCheckIntegrity && selectedExpiry && !expirationsPresent.has(selectedExpiry)) {
         const reason = `BLOCKED: Chain missing selected expiry ${selectedExpiry} for target ${targetDte}`;
         debugLog(ctx, "integrity_block", {
           target_dte: targetDte,
@@ -2719,7 +2751,7 @@ function applySnapshotHeaderIntegrityGuards(payload: DashboardPayload, ctx: ReqC
       const symbols = new Set(
         Array.isArray(targetNode.symbols) ? targetNode.symbols.map((v) => String(v).toUpperCase()) : [],
       );
-      if (next.ready && symbols.size > 0) {
+      if (shouldCheckIntegrity && symbols.size > 0) {
         const missing = (next.legs ?? [])
           .map((leg) => String(leg.symbol ?? "").toUpperCase())
           .filter((sym) => sym && !symbols.has(sym));
@@ -2743,7 +2775,7 @@ function applySnapshotHeaderIntegrityGuards(payload: DashboardPayload, ctx: ReqC
       }
     }
 
-    if (next.ready) {
+    if (shouldCheckIntegrity) {
       const greek = next.greeks ?? {};
       const haveLegGreeks =
         Number.isFinite(Number(greek.delta)) &&
@@ -3017,19 +3049,74 @@ function applyExecutionModel(payload: DashboardPayload): DashboardPayload {
   };
 }
 
+function applyCandidateProbMetrics(payload: DashboardPayload): DashboardPayload {
+  const spot = toFiniteNumber(payload.metrics?.spx);
+  const ivAtm = extractIvAtm(payload);
+  const ivFreshMs = typeof payload.data_age_ms?.chain === "number" ? payload.data_age_ms.chain : null;
+  const ivFreshMaxAgeMs = Number(process.env.VOL_IV_MAX_AGE_MS ?? 5_000);
+  const nextCandidates = (payload.candidates ?? []).map((candidate) => {
+    const result = attachCandidateMetrics(candidate, {
+      spot,
+      ivAtm,
+      ivFreshMs,
+      ivFreshMaxAgeMs,
+      decisionMode: DECISION_MODE,
+    });
+    if (result.hardBlockCode === "INVALID_SPREAD_GEOMETRY") {
+      const reason = "Invalid spread geometry.";
+      return {
+        ...result.candidate,
+        hardBlockCode: "INVALID_SPREAD_GEOMETRY",
+        hardBlockReason: reason,
+        ready: false,
+        blockedReason: reason,
+        reason,
+      };
+    }
+    return result.candidate;
+  });
+  return {
+    ...payload,
+    candidates: nextCandidates,
+  };
+}
+
 function parseIso(value: string | undefined): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : null;
 }
 
-function applyAlertPolicy(payload: DashboardPayload): DashboardPayload {
+function applyAlertPolicy(payload: DashboardPayload, enabled = true): DashboardPayload {
   const policy = loadAlertPolicySettings();
   const state = loadAlertPolicyRuntimeState();
   const nowIso = new Date().toISOString();
   const nowMs = Date.now();
   let suppressedCount = 0;
   let changed = false;
+
+  if (!enabled) {
+    const byStrategy: Record<string, { sentToday: number; cooldownRemainingSec: number }> = {};
+    for (const strategy of STRATEGY_KEYS) {
+      const strategyState = state.byStrategy[strategy] ?? { sentToday: 0 };
+      const cooldown = policy.cooldownSecondsByStrategy[strategy] ?? 0;
+      const lastMs = parseIso(strategyState.lastSentIso);
+      const secondsSince = lastMs == null ? Number.POSITIVE_INFINITY : Math.max(0, Math.floor((nowMs - lastMs) / 1000));
+      byStrategy[strategy] = {
+        sentToday: strategyState.sentToday,
+        cooldownRemainingSec: Math.max(0, cooldown - secondsSince),
+      };
+    }
+    return {
+      ...payload,
+      alertPolicy: policy,
+      alertPolicyState: {
+        dateEt: state.dateEt,
+        byStrategy,
+        suppressedCount: 0,
+      },
+    };
+  }
 
   const allowed: AlertItem[] = [];
   for (const alert of payload.alerts) {
@@ -3551,16 +3638,81 @@ function readTradeStateOpenTrades(): OpenTrade[] {
           ];
         }
 
+        const initialCredit = Number(t.initial_credit ?? 0);
+        let maxProfit: number | null = null;
+        let maxLoss: number | null = null;
+        let ror: number | null = null;
+        let breakeven: number | null = null;
+        let breakevenLow: number | null = null;
+        let breakevenHigh: number | null = null;
+        let creditPct: number | null = null;
+
+        if (strategy === "Directional Spread") {
+          const shortLeg = legs.find((leg) => leg.action === "SELL");
+          const longLeg = legs.find((leg) => leg.action === "BUY");
+          if (shortLeg && longLeg) {
+            const side = shortLeg.type === "PUT" ? "PUT_CREDIT" : "CALL_CREDIT";
+            const payoff = computeVerticalPayoff({
+              side,
+              shortStrike: shortLeg.strike,
+              longStrike: longLeg.strike,
+              credit: initialCredit,
+              multiplier: 100,
+              contracts: 1,
+            });
+            if (payoff.valid) {
+              maxProfit = payoff.maxProfit;
+              maxLoss = payoff.maxLoss;
+              ror = payoff.ror;
+              breakeven = payoff.breakeven;
+              creditPct = payoff.creditPct;
+            }
+          }
+        } else if (strategy === "Iron Condor" || strategy === "Iron Fly") {
+          const shortPut = legs.find((leg) => leg.action === "SELL" && leg.type === "PUT");
+          const shortCall = legs.find((leg) => leg.action === "SELL" && leg.type === "CALL");
+          const longPut = legs.find((leg) => leg.action === "BUY" && leg.type === "PUT");
+          const longCall = legs.find((leg) => leg.action === "BUY" && leg.type === "CALL");
+          if (shortPut && shortCall && longPut && longCall) {
+            const widthPut = Math.abs(shortPut.strike - longPut.strike);
+            const widthCall = Math.abs(shortCall.strike - longCall.strike);
+            const width = Math.min(widthPut, widthCall);
+            const payoff = computeIronPayoff({
+              shortPutStrike: shortPut.strike,
+              shortCallStrike: shortCall.strike,
+              width,
+              credit: initialCredit,
+              multiplier: 100,
+              contracts: 1,
+            });
+            if (payoff.valid) {
+              maxProfit = payoff.maxProfit;
+              maxLoss = payoff.maxLoss;
+              ror = payoff.ror;
+              breakevenLow = payoff.breakevenLow ?? null;
+              breakevenHigh = payoff.breakevenHigh ?? null;
+              creditPct = payoff.creditPct;
+            }
+          }
+        }
+
         return {
           id: String(t.trade_id ?? `T-${idx + 1}`),
           strategy,
           entryEt: "-",
           spot: 0,
           legs,
-          initialCredit: Number(t.initial_credit ?? 0),
+          initialCredit,
           currentDebit: Number(t.current_debit ?? 0),
           plPct: Number(t.profit_pct ?? 0),
           popPct: Number(t.pop_delta ?? 0),
+          maxProfit,
+          maxLoss,
+          ror,
+          breakeven,
+          breakevenLow,
+          breakevenHigh,
+          creditPct,
           status: String(t.status) === "exit_pending" ? "EXIT_PENDING" : "OPEN",
           nextReason: String(t.next_exit_reason ?? ""),
         };
@@ -4691,14 +4843,7 @@ function applyNonBlockingGateIssueNotices(payload: DashboardPayload): DashboardP
 }
 
 function isReadyCreditSpreadCandidate(candidate: DashboardPayload["candidates"][number]): boolean {
-  if (!candidate.ready) return false;
-  if (/debit|butterfly|condor|fly/i.test(candidate.strategy)) return false;
-  const puts = candidate.legs.filter((leg) => leg.type === "PUT");
-  const calls = candidate.legs.filter((leg) => leg.type === "CALL");
-  const isVertical = (puts.length === 2 && calls.length === 0) || (calls.length === 2 && puts.length === 0);
-  if (!isVertical) return false;
-  const premium = Number(candidate.adjustedPremium ?? candidate.premium ?? candidate.credit ?? 0);
-  return Number.isFinite(premium) && premium > 0;
+  return Boolean(candidate.ready) && isCreditSpreadVerticalCandidate(candidate);
 }
 
 function classifySpreadTypeFromLegs(legs: OptionLeg[]): { spreadType: string; shortStrike: number; longStrike: number } | null {
@@ -4752,20 +4897,99 @@ function resolveDteMetaForCandidate(
   };
 }
 
+type AlertEligibilityResult = {
+  ok: boolean;
+  reasonCode?: string;
+  reasonMessage?: string;
+  pop: number | null;
+  ror: number | null;
+  creditPct: number | null;
+  meta: { targetDte: number | null; selectedDte: number | null; expiry: string | null; spreadType: string };
+};
+
+function evaluateAlertEligibility(
+  payload: DashboardPayload,
+  candidate: DashboardPayload["candidates"][number],
+): AlertEligibilityResult {
+  const meta = resolveDteMetaForCandidate(payload, candidate);
+  if (meta.targetDte != null && (meta.selectedDte == null || meta.expiry == null)) {
+    return {
+      ok: false,
+      reasonCode: "MISSING_EXPIRY_FOR_BUCKET",
+      reasonMessage: `Missing expiry for ${candidate.strategy}.`,
+      pop: null,
+      ror: null,
+      creditPct: null,
+      meta,
+    };
+  }
+  if (candidate.hardBlockCode === "INVALID_SPREAD_GEOMETRY") {
+    return {
+      ok: false,
+      reasonCode: "INVALID_SPREAD_GEOMETRY",
+      reasonMessage: candidate.hardBlockReason ?? "Invalid spread geometry.",
+      pop: null,
+      ror: null,
+      creditPct: null,
+      meta,
+    };
+  }
+
+  if (DECISION_MODE === "PROBABILISTIC") {
+    const result = evaluateProbabilisticEligibility(candidate, {
+      minPop: PROB_MIN_POP,
+      minRor: PROB_MIN_ROR,
+      minCreditPct: PROB_MIN_CREDIT_PCT,
+    });
+    return { ...result, meta };
+  }
+
+  const pop = Number.isFinite(candidate.popPct ?? Number.NaN) ? Number(candidate.popPct) : null;
+  const ror = resolveCandidateRor(candidate);
+  const creditPct = resolveCandidateCreditPct(candidate);
+  if (!isReadyCreditSpreadCandidate(candidate)) {
+    return {
+      ok: false,
+      reasonCode: candidate.hardBlockCode === "INVALID_SPREAD_GEOMETRY" ? "INVALID_SPREAD_GEOMETRY" : "HARD_GATES_NOT_MET",
+      reasonMessage: candidate.blockedReason ?? candidate.reason ?? "Candidate not ready.",
+      pop,
+      ror,
+      creditPct,
+      meta,
+    };
+  }
+  return { ok: true, pop, ror, creditPct, meta };
+}
+
 function buildCreditSpreadReadyAlerts(payload: DashboardPayload): AlertItem[] {
   const dateKey = etDateKey();
   const out: AlertItem[] = [];
 
   for (const candidate of payload.candidates ?? []) {
-    if (!isReadyCreditSpreadCandidate(candidate)) continue;
+    if (!isCreditSpreadVerticalCandidate(candidate)) continue;
+    const eligibility = evaluateAlertEligibility(payload, candidate);
+    if (!eligibility.ok) continue;
     const spread = classifySpreadTypeFromLegs(candidate.legs);
     if (!spread) continue;
-    const meta = resolveDteMetaForCandidate(payload, candidate);
+    const meta = eligibility.meta;
     const shortDelta = candidate.legs.find((leg) => leg.action === "SELL")?.delta;
-    const popPct = Number.isFinite(Number(shortDelta)) ? Math.max(0, Math.min(1, 1 - Math.abs(Number(shortDelta)))) : null;
+    const popPct =
+      eligibility.pop ??
+      (Number.isFinite(Number(candidate.popPct))
+        ? Number(candidate.popPct)
+        : Number.isFinite(Number(shortDelta))
+          ? Math.max(0, Math.min(1, 1 - Math.abs(Number(shortDelta))))
+          : null);
     const expiryPart = meta.expiry ?? "NA";
     const id = `ENTRY-${candidate.strategy.replace(/\s+/g, "_").replace(/[^A-Za-z0-9_\-]/g, "")}-${dateKey}-${expiryPart}-${Math.round(spread.shortStrike)}-${Math.round(spread.longStrike)}`;
     const credit = Number(candidate.adjustedPremium ?? candidate.premium ?? candidate.credit ?? 0);
+    const popLabel = eligibility.pop == null ? "-" : `${Math.round(eligibility.pop * 100)}%`;
+    const rorLabel = eligibility.ror == null ? "-" : eligibility.ror.toFixed(2);
+    const creditPctLabel = eligibility.creditPct == null ? "-" : eligibility.creditPct.toFixed(2);
+    const reason =
+      DECISION_MODE === "PROBABILISTIC"
+        ? `Probabilistic thresholds met (PoP ${popLabel}, RoR ${rorLabel}, C/W ${creditPctLabel}).`
+        : `${meta.spreadType} criteria passed.`;
 
     out.push({
       id,
@@ -4782,7 +5006,7 @@ function buildCreditSpreadReadyAlerts(payload: DashboardPayload): AlertItem[] {
       expiry: meta.expiry,
       targetDte: meta.targetDte,
       selectedDte: meta.selectedDte,
-      reason: `${meta.spreadType} criteria passed.`,
+      reason,
       severity: "good",
       checklistSummary:
         candidate.reason ||
@@ -4801,6 +5025,132 @@ function mergeAlerts(base: AlertItem[], additions: AlertItem[]): AlertItem[] {
     }
   }
   return Array.from(map.values());
+}
+
+function isAlertDataModeAllowed(payload: DashboardPayload): boolean {
+  if (payload.data_mode === "LIVE") return true;
+  if (payload.market_closed_override && ALLOW_SIM_ALERTS) return true;
+  return false;
+}
+
+function stableCandidateId(candidate: DashboardPayload["candidates"][number]): string {
+  return String(candidate.candidateId ?? `${candidate.strategy}|${legSignatureFromCandidate(candidate)}`);
+}
+
+function pickBestCreditCandidate(
+  payload: DashboardPayload,
+  decision: DecisionOutput,
+): DashboardPayload["candidates"][number] | null {
+  const ranked = decision.ranked ?? [];
+  const rankedCredit = ranked.map((row) => row.candidate).find((candidate) => isCreditSpreadVerticalCandidate(candidate));
+  if (rankedCredit) return rankedCredit;
+
+  const creditOnly = (payload.candidates ?? []).filter((candidate) => isCreditSpreadVerticalCandidate(candidate));
+  if (creditOnly.length === 0) return null;
+  const rankedFallback = rankCandidatesDeterministic(creditOnly, DECISION_MODE, {
+    applyGammaPenalty: PROB_MAX_GAMMA_PENALTY,
+  });
+  return rankedFallback[0]?.candidate ?? creditOnly[0];
+}
+
+function deriveAlertGate(params: {
+  payload: DashboardPayload;
+  decision: DecisionOutput;
+  bestCandidate: DashboardPayload["candidates"][number] | null;
+  eligibility: AlertEligibilityResult | null;
+  alertCount: number;
+}): { gateCode: string; gateMessage: string } {
+  const { payload, decision, bestCandidate, eligibility, alertCount } = params;
+
+  if (!ALERTS_ENABLED) {
+    return { gateCode: "ALERTS_DISABLED", gateMessage: "Alerts disabled via ALERTS_ENABLED=false." };
+  }
+  if (!isAlertDataModeAllowed(payload)) {
+    return { gateCode: "DATA_MODE_NOT_LIVE", gateMessage: `Data mode ${payload.data_mode ?? "unknown"}; alerts require LIVE.` };
+  }
+
+  const hardBlock = (decision.blocks ?? []).find((row) =>
+    ["MARKET_CLOSED", "DATA_INCOMPLETE", "DATA_STALE_SPOT", "DATA_STALE_CHAIN", "DATA_STALE_GREEKS"].includes(row.code),
+  );
+  if (hardBlock) {
+    return { gateCode: hardBlock.code, gateMessage: hardBlock.message };
+  }
+
+  if (!bestCandidate) {
+    return { gateCode: "ALERTS_NO_CANDIDATE", gateMessage: "No credit spread candidate available." };
+  }
+  if (eligibility && !eligibility.ok) {
+    return {
+      gateCode: eligibility.reasonCode ?? "ALERTS_NO_CANDIDATE",
+      gateMessage: eligibility.reasonMessage ?? "Candidate failed alert thresholds.",
+    };
+  }
+
+  if (alertCount > 0) {
+    return { gateCode: "ALERT_SENT", gateMessage: "Alert eligible and emitted." };
+  }
+
+  const debounceWarning = (payload.warnings ?? []).find((warning) => /entry debounce/i.test(warning));
+  if (debounceWarning) {
+    return { gateCode: "CANDIDATE_READY_DEBOUNCED", gateMessage: debounceWarning };
+  }
+
+  const strategy = bestCandidate.strategy;
+  const policy = payload.alertPolicy;
+  const policyState = payload.alertPolicyState?.byStrategy?.[strategy];
+  if (policy && policyState) {
+    const maxAlerts = policy.maxAlertsPerDayByStrategy[strategy] ?? 0;
+    if (maxAlerts > 0 && policyState.sentToday >= maxAlerts) {
+      return {
+        gateCode: "ALERT_DAY_CAP_REACHED",
+        gateMessage: `Day cap reached (${policyState.sentToday}/${maxAlerts}).`,
+      };
+    }
+    if (policyState.cooldownRemainingSec > 0) {
+      return {
+        gateCode: "ALERT_COOLDOWN_ACTIVE",
+        gateMessage: `Cooldown active (${policyState.cooldownRemainingSec}s remaining).`,
+      };
+    }
+  }
+
+  return { gateCode: "ALERTS_NO_CANDIDATE", gateMessage: "Alert suppressed by policy or debounce." };
+}
+
+function recordAlertDecisionLog(payload: DashboardPayload, decision: DecisionOutput): void {
+  const bestCandidate = pickBestCreditCandidate(payload, decision);
+  const eligibility = bestCandidate ? evaluateAlertEligibility(payload, bestCandidate) : null;
+  const gate = deriveAlertGate({
+    payload,
+    decision,
+    bestCandidate,
+    eligibility,
+    alertCount: payload.alerts?.length ?? 0,
+  });
+
+  recordAlertDecision({
+    tsIso: new Date().toISOString(),
+    runId: decision.debug.runId,
+    decisionMode: decision.decisionMode,
+    dataMode: decision.debug.dataMode,
+    session: decision.debug.session,
+    bestCandidateId: bestCandidate ? stableCandidateId(bestCandidate) : null,
+    bestStrategy: bestCandidate?.strategy ?? null,
+    bestPop: eligibility?.pop ?? null,
+    bestRor: eligibility?.ror ?? null,
+    bestCreditPct: eligibility?.creditPct ?? null,
+    gateCode: gate.gateCode,
+    gateMessage: gate.gateMessage,
+    alertCount: payload.alerts?.length ?? 0,
+    details: {
+      thresholds: {
+        minPop: PROB_MIN_POP,
+        minRor: PROB_MIN_ROR,
+        minCreditPct: PROB_MIN_CREDIT_PCT,
+      },
+      alertsEnabled: ALERTS_ENABLED,
+    },
+  });
 }
 
 function loadTelegramState(): TelegramDedupeState {
@@ -4858,17 +5208,18 @@ function formatTelegramAlert(alert: AlertItem): string {
   ].join("\n");
 }
 
-async function maybeSendTelegramAlerts(alerts: AlertItem[], enabled: boolean) {
-  if (!enabled || alerts.length === 0) return;
+async function maybeSendTelegramAlerts(alerts: AlertItem[], enabled: boolean): Promise<number> {
+  if (!enabled || alerts.length === 0) return 0;
 
   const token = telegramToken();
   const chatId = telegramChatId();
-  if (!token || !chatId) return;
+  if (!token || !chatId) return 0;
 
   const state = loadTelegramState();
   const sent = new Set(state.sent_ids);
   const beforeSize = sent.size;
   const apiUrl = `https://api.telegram.org/bot${token}/sendMessage`;
+  let sentCount = 0;
 
   for (const alert of alerts) {
     if (sent.has(alert.id)) continue;
@@ -4885,6 +5236,7 @@ async function maybeSendTelegramAlerts(alerts: AlertItem[], enabled: boolean) {
 
       if (res.ok) {
         sent.add(alert.id);
+        sentCount += 1;
         recordAlertSentEvent({
           strategy: alert.strategy,
           candidate_id: null,
@@ -4901,6 +5253,7 @@ async function maybeSendTelegramAlerts(alerts: AlertItem[], enabled: boolean) {
   if (sent.size !== beforeSize) {
     saveTelegramState({ sent_ids: Array.from(sent) });
   }
+  return sentCount;
 }
 
 async function sendTelegramMessage(text: string): Promise<{ ok: boolean; status: number; message: string }> {
@@ -5195,6 +5548,123 @@ async function maybeSendMacroBlockAlert(payload: DashboardPayload, enabled: bool
   saveSystemAlertState(state);
 }
 
+function etDateKeyFromIso(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  return etDateKey(new Date(ms));
+}
+
+function isNearMarketCloseEt(now = new Date()): boolean {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  if (hour === 15 && minute >= 45) return true;
+  if (hour === 16 && minute <= 10) return true;
+  return false;
+}
+
+function summarizeAlertDecisionReasons(dateKey: string): string[] {
+  const rows = listAlertDecisions(200);
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const rowKey = etDateKeyFromIso(row.tsIso);
+    if (rowKey !== dateKey) continue;
+    const code = String(row.gateCode ?? "UNKNOWN");
+    counts.set(code, (counts.get(code) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([code, count]) => `${code} (${count})`);
+}
+
+async function maybeSendAlertStartupTest(payload: DashboardPayload, enabled: boolean): Promise<void> {
+  if (!enabled || !ALERTS_TEST_ON_STARTUP) return;
+  const state = loadSystemAlertState();
+  if (state.lastAlertTestBootId === BOOT_ID) return;
+
+  const lines = [
+    "✅ SPX0DTE WORKER STARTED OK",
+    `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
+    `Mode: ${payload.data_mode ?? "unknown"} | Decision: ${DECISION_MODE}`,
+  ];
+  const sent = await sendTelegramMessage(lines.join("\n"));
+  if (sent.ok) {
+    state.lastAlertTestBootId = BOOT_ID;
+    state.lastAlertTestSentAtIso = new Date().toISOString();
+    saveSystemAlertState(state);
+  }
+}
+
+async function maybeSendAlertHeartbeat(
+  payload: DashboardPayload,
+  decision: DecisionOutput,
+  enabled: boolean,
+): Promise<void> {
+  if (!enabled) return;
+  const state = loadSystemAlertState();
+  const nowIso = new Date().toISOString();
+  const nowMs = Date.now();
+  const thresholdMs = ALERTS_HEARTBEAT_MINUTES * 60 * 1000;
+  const lastAlertMs = parseIsoMs(state.lastAlertSentAtIso);
+  const lastHeartbeatMs = parseIsoMs(state.lastHeartbeatSentAtIso);
+
+  if (lastAlertMs == null && lastHeartbeatMs == null) {
+    state.lastHeartbeatSentAtIso = nowIso;
+    saveSystemAlertState(state);
+    return;
+  }
+
+  if (lastAlertMs != null && nowMs - lastAlertMs < thresholdMs) return;
+  if (lastHeartbeatMs != null && nowMs - lastHeartbeatMs < thresholdMs) return;
+
+  const bestCandidate = pickBestCreditCandidate(payload, decision);
+  const bestPop =
+    Number.isFinite(bestCandidate?.popPct ?? Number.NaN) ? `${Math.round(Number(bestCandidate?.popPct) * 100)}%` : "-";
+  const lines = [
+    "ℹ️ SPX0DTE HEARTBEAT",
+    `Time: ${payload.generatedAtEt} ET / ${payload.generatedAtParis} Paris`,
+    `Data mode: ${payload.data_mode ?? "unknown"} | Decision: ${DECISION_MODE}`,
+    `Best PoP: ${bestPop}`,
+  ];
+  const sent = await sendTelegramMessage(lines.join("\n"));
+  if (sent.ok) {
+    state.lastHeartbeatSentAtIso = nowIso;
+    saveSystemAlertState(state);
+  }
+}
+
+async function maybeSendNoAlertSummary(payload: DashboardPayload, enabled: boolean): Promise<void> {
+  if (!enabled || !ALERTS_SUMMARY_ON_NO_CANDIDATE) return;
+  if (!isNearMarketCloseEt()) return;
+
+  const state = loadSystemAlertState();
+  const todayKey = etDateKey();
+  if (state.lastNoAlertSummaryDate === todayKey) return;
+
+  const lastAlertDate = etDateKeyFromIso(state.lastAlertSentAtIso ?? null);
+  if (lastAlertDate === todayKey) return;
+
+  const reasons = summarizeAlertDecisionReasons(todayKey);
+  const lines = [
+    "📌 SPX0DTE DAILY ALERT SUMMARY",
+    `Date: ${todayKey} ET`,
+    "No alerts were sent today.",
+    reasons.length > 0 ? `Top gates: ${reasons.join(\" | \")}` : "Top gates: n/a",
+  ];
+  const sent = await sendTelegramMessage(lines.join("\n"));
+  if (sent.ok) {
+    state.lastNoAlertSummaryDate = todayKey;
+    saveSystemAlertState(state);
+  }
+}
+
 export async function GET(request: Request) {
   const ctx = buildReqCtx(request, "GET");
   debugLog(ctx, "request_start");
@@ -5306,14 +5776,32 @@ export async function GET(request: Request) {
   payload = applyDataContract(payload);
   payload = applyStaleDataKillSwitch(payload);
   payload = applyExecutionModel(payload);
+  payload = applyCandidateProbMetrics(payload);
   payload = stripRiskSleeveChecks(payload);
+  if (DECISION_MODE === "STRICT") {
+    payload = {
+      ...payload,
+      candidates: payload.candidates.map(enforceStrictCandidate),
+    };
+  }
+  payload = applyNonBlockingGateIssueNotices(payload);
   payload = {
     ...payload,
-    candidates: payload.candidates.map(enforceStrictCandidate),
+    decisionMode: DECISION_MODE,
   };
-  payload = applyNonBlockingGateIssueNotices(payload);
+  payload = withDataModeAndAges(payload, marketClosedOverride);
+  payload = applySnapshotHeaderIntegrityGuards(payload, ctx);
 
-  const readyStrategies = new Set(payload.candidates.filter((c) => c.ready).map((c) => c.strategy));
+  const readyStrategies = new Set(
+    payload.candidates
+      .filter((c) => {
+        if (DECISION_MODE === "PROBABILISTIC" && isCreditSpreadVerticalCandidate(c)) {
+          return evaluateAlertEligibility(payload, c).ok;
+        }
+        return c.ready;
+      })
+      .map((c) => c.strategy),
+  );
   payload = {
     ...payload,
     alerts: payload.alerts.filter((alert) => alert.type !== "ENTRY" || readyStrategies.has(alert.strategy)),
@@ -5331,7 +5819,7 @@ export async function GET(request: Request) {
     ...payload,
     alerts: applyAlertAckSuppression(payload.alerts),
   };
-  payload = applyAlertPolicy(payload);
+  payload = applyAlertPolicy(payload, ALERTS_ENABLED);
   payload = applyEntryDebounce(payload);
   payload = withEvaluationTick(payload);
   payload = withOpenRiskHeatmap(payload);
@@ -5344,8 +5832,6 @@ export async function GET(request: Request) {
       markSync,
     },
   };
-  payload = withDataModeAndAges(payload, marketClosedOverride);
-  payload = applySnapshotHeaderIntegrityGuards(payload, ctx);
   payload = ensureSnapshotHeaderShape(payload);
   const decision = evaluateDecision(buildDecisionInput(payload));
   payload = {
@@ -5360,6 +5846,13 @@ export async function GET(request: Request) {
       ]),
     ),
   };
+  recordAlertDecisionLog(payload, decision);
+  payload = {
+    ...payload,
+    alertDiagnostics: {
+      recent: listAlertDecisions(20),
+    },
+  };
   debugLog(ctx, "decision_run", {
     run_id: decision.debug.runId,
     status: decision.status,
@@ -5372,11 +5865,24 @@ export async function GET(request: Request) {
   appendSnapshotLog(payload);
   saveProviderHealthState(payload);
   const canSendOperationalAlerts = telegramEnabled && (marketOpen || (marketClosedOverride && ALLOW_SIM_ALERTS));
+  const canSendAlertOps = telegramEnabled && ALERTS_ENABLED;
+  const canSendCandidateAlerts =
+    canSendOperationalAlerts && ALERTS_ENABLED && isAlertDataModeAllowed(payload);
+
   await maybeSendSystemHealthAlert(payload, canSendOperationalAlerts && ENABLE_SYSTEM_HEALTH_ALERTS);
   await maybeSendGateNoticeAlert(payload, canSendOperationalAlerts && ENABLE_GATE_NOTICE_ALERTS);
   await maybeSendMacroBlockAlert(payload, canSendOperationalAlerts && ENABLE_MACRO_ALERTS);
+  await maybeSendAlertStartupTest(payload, canSendAlertOps);
 
-  await maybeSendTelegramAlerts(payload.alerts, canSendOperationalAlerts);
+  const sentCount = await maybeSendTelegramAlerts(payload.alerts, canSendCandidateAlerts);
+  if (sentCount > 0) {
+    const state = loadSystemAlertState();
+    state.lastAlertSentAtIso = new Date().toISOString();
+    saveSystemAlertState(state);
+  }
+
+  await maybeSendAlertHeartbeat(payload, decision, canSendAlertOps);
+  await maybeSendNoAlertSummary(payload, canSendAlertOps);
 
   const durationMs = Date.now() - ctx.startedAtMs;
   const responsePayload = finalizeResponsePayload(payload);

@@ -138,6 +138,28 @@ Session policy is controlled with:
 ```bash
 SIMULATION_MODE=false
 ALLOW_SIM_ALERTS=false
+```
+
+### Probabilistic Alert Mode
+
+Enable probabilistic scoring (PoP/RoR/EV) while keeping strict mode as the default:
+
+```bash
+DECISION_MODE=PROBABILISTIC
+PROB_MIN_POP=0.55
+PROB_MIN_ROR=0.10
+PROB_MIN_CREDIT_PCT=0.08
+PROB_MAX_GAMMA_PENALTY=true
+ALERTS_ENABLED=true
+ALERTS_TEST_ON_STARTUP=false
+ALERTS_HEARTBEAT_MINUTES=60
+ALERTS_SUMMARY_ON_NO_CANDIDATE=false
+```
+
+Notes:
+- `DECISION_MODE` defaults to `STRICT` if unset.
+- Probabilistic mode only hard-blocks on data freshness/session policy, invalid spread geometry, or missing bucket expiry.
+- Alert diagnostics are persisted to `storage/.alert_decisions.db` (override with `ALERT_DECISION_DB_PATH`).
 
 ### Balanced Preset (Strategy Gating)
 

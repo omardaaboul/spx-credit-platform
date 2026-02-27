@@ -10,7 +10,7 @@ type TradeCardProps = {
 };
 
 export default function TradeCard({ trade, onCopyTicket, onCloseTrade, closeBusy = false }: TradeCardProps) {
-  const riskImpact = estimateRiskImpact(trade);
+  const maxLoss = resolveMaxLossValue(trade);
   const canCloseInApp = trade.strategy === "2-DTE Credit Spread";
   const statusTone = trade.status === "OPEN" ? "text-emerald-300" : trade.status === "EXIT_PENDING" ? "text-amber-300" : "text-[var(--spx-muted)]";
 
@@ -24,13 +24,15 @@ export default function TradeCard({ trade, onCopyTicket, onCloseTrade, closeBusy
         <span className={`text-xs font-medium ${statusTone}`}>{trade.status}</span>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-6">
         <MiniStat label="Width" value={estimateWidth(trade)} />
         <MiniStat label="Credit" value={trade.initialCredit.toFixed(2)} />
         <MiniStat label="Current P/L" value={`${(trade.plPct * 100).toFixed(0)}%`} />
-        <MiniStat label="Risk impact" value={riskImpact} />
-        <MiniStat label="POP" value={`${(trade.popPct * 100).toFixed(0)}%`} />
+        <MiniStat label="Max Loss" value={formatDollars(maxLoss)} />
+        <MiniStat label="RoR" value={formatPct(trade.ror, 2)} />
+        <MiniStat label="PoP" value={formatPct(trade.popPct, 0)} />
       </div>
+      <p className="text-xs text-[var(--spx-muted)]">Breakeven: {formatBreakeven(trade)}</p>
 
       <details className="rounded-lg border border-[var(--spx-border)] bg-[var(--spx-panel)] p-2">
         <summary className="cursor-pointer text-xs text-[var(--spx-muted)]">Actions</summary>
@@ -91,4 +93,33 @@ function estimateRiskImpact(trade: OpenTrade): string {
   if (!Number.isFinite(width)) return "-";
   const risk = Math.max(0, width - Math.max(0, trade.initialCredit));
   return `${risk.toFixed(2)}`;
+}
+
+function resolveMaxLossValue(trade: OpenTrade): number | null {
+  if (trade.maxLoss != null && Number.isFinite(trade.maxLoss)) return trade.maxLoss;
+  const fallback = Number(estimateRiskImpact(trade));
+  return Number.isFinite(fallback) ? fallback : null;
+}
+
+function formatPct(value: number | null | undefined, decimals = 0): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `${(value * 100).toFixed(decimals)}%`;
+}
+
+function formatDollars(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function formatBreakeven(trade: OpenTrade): string {
+  if (trade.breakeven != null && Number.isFinite(trade.breakeven)) return trade.breakeven.toFixed(2);
+  if (
+    trade.breakevenLow != null &&
+    trade.breakevenHigh != null &&
+    Number.isFinite(trade.breakevenLow) &&
+    Number.isFinite(trade.breakevenHigh)
+  ) {
+    return `${trade.breakevenLow.toFixed(2)}–${trade.breakevenHigh.toFixed(2)}`;
+  }
+  return "-";
 }

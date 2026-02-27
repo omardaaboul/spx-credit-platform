@@ -319,7 +319,10 @@ function buildSleeveMetrics(candidate?: CandidateCard): Array<{ label: string; v
 
   const metrics: Array<{ label: string; value: string }> = [];
   metrics.push({ label: premiumLabel, value: Number.isFinite(premium) ? premium.toFixed(2) : "-" });
-  metrics.push({ label: "POP", value: Number.isFinite(candidate.popPct) ? `${(candidate.popPct * 100).toFixed(0)}%` : "-" });
+  metrics.push({
+    label: "POP",
+    value: Number.isFinite(candidate.popPct ?? Number.NaN) ? `${(Number(candidate.popPct) * 100).toFixed(0)}%` : "-",
+  });
 
   if (Number.isFinite(candidate.width) && candidate.width > 0) {
     metrics.push({ label: "Width", value: `${candidate.width}` });

@@ -72,6 +72,21 @@ export type AlertItem = {
   checklistSummary?: string;
 };
 
+export type AlertDecisionLog = {
+  tsIso: string;
+  decisionMode: string;
+  dataMode: string;
+  session: string;
+  bestCandidateId: string | null;
+  bestStrategy: string | null;
+  bestPop: number | null;
+  bestRor: number | null;
+  bestCreditPct: number | null;
+  gateCode: string;
+  gateMessage: string;
+  alertCount: number;
+};
+
 export type MetricSnapshot = {
   spx: number;
   emr: number;
@@ -103,7 +118,21 @@ export type CandidateCard = {
     notes?: string;
   };
   maxRisk: number;
-  popPct: number;
+  popPct: number | null;
+  probTouch?: number;
+  popConfidence?: "HIGH" | "LOW";
+  maxProfit?: number | null;
+  maxLoss?: number | null;
+  ror?: number | null;
+  breakeven?: number | null;
+  breakevenLow?: number | null;
+  breakevenHigh?: number | null;
+  creditPct?: number | null;
+  ev?: number | null;
+  evRor?: number | null;
+  warnings?: string[];
+  hardBlockCode?: string;
+  hardBlockReason?: string;
   reason: string;
   legs: OptionLeg[];
   greeks?: {
@@ -130,7 +159,14 @@ export type OpenTrade = {
   initialCredit: number;
   currentDebit: number;
   plPct: number;
-  popPct: number;
+  popPct: number | null;
+  maxProfit?: number | null;
+  maxLoss?: number | null;
+  ror?: number | null;
+  breakeven?: number | null;
+  breakevenLow?: number | null;
+  breakevenHigh?: number | null;
+  creditPct?: number | null;
   status: "OPEN" | "EXIT_PENDING" | "CLOSED";
   nextReason: string;
 };
@@ -151,6 +187,7 @@ export type VolPoint = {
 export type DashboardPayload = {
   generatedAtEt: string;
   generatedAtParis: string;
+  decisionMode?: "STRICT" | "PROBABILISTIC";
   data_mode?: "LIVE" | "DELAYED" | "HISTORICAL" | "FIXTURE";
   data_age_ms?: {
     spot: number | null;
@@ -197,6 +234,9 @@ export type DashboardPayload = {
         error?: string;
       }
     >;
+  };
+  alertDiagnostics?: {
+    recent: AlertDecisionLog[];
   };
   symbolValidation?: {
     dte0?: string[];

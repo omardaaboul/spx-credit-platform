@@ -1,5 +1,5 @@
 import type { CandidateCard } from "@/lib/spx0dte";
-import type { RankedCandidate } from "@/lib/contracts/decision";
+import type { DecisionMode, RankedCandidate } from "@/lib/contracts/decision";
 import { parseDteFromStrategy } from "@/lib/engine/dte";
 
 const DELTA_BANDS: Record<number, [number, number]> = {
@@ -40,16 +40,40 @@ function stableCandidateId(candidate: CandidateCard): string {
   return String(candidate.candidateId ?? `${candidate.strategy}:${candidate.width}:${candidate.maxRisk}`);
 }
 
-export function rankCandidatesDeterministic(candidates: CandidateCard[]): RankedCandidate[] {
+type RankOptions = {
+  applyGammaPenalty?: boolean;
+};
+
+export function rankCandidatesDeterministic(
+  candidates: CandidateCard[],
+  mode: DecisionMode = "STRICT",
+  opts: RankOptions = {},
+): RankedCandidate[] {
   const rows = candidates.map((candidate) => ({
     candidate,
     candidateId: stableCandidateId(candidate),
     deltaFit: absDeltaMidpointFit(candidate),
     creditPerWidth: creditWidth(candidate),
     gamma: gammaPenalty(candidate),
+    pop: Number.isFinite(candidate.popPct ?? Number.NaN) ? candidate.popPct : null,
+    ror: Number.isFinite(candidate.ror) ? candidate.ror : null,
+    evRor: Number.isFinite(candidate.evRor) ? candidate.evRor : null,
   }));
 
+  const applyGamma = opts.applyGammaPenalty !== false;
+
   rows.sort((a, b) => {
+    if (mode === "PROBABILISTIC") {
+      const popA = a.pop ?? -1;
+      const popB = b.pop ?? -1;
+      if (popA !== popB) return popB - popA;
+      const rorA = a.ror ?? a.evRor ?? -1;
+      const rorB = b.ror ?? b.evRor ?? -1;
+      if (rorA !== rorB) return rorB - rorA;
+      if (applyGamma && a.gamma !== b.gamma) return a.gamma - b.gamma;
+      return a.candidateId.localeCompare(b.candidateId);
+    }
+
     if (a.deltaFit !== b.deltaFit) return a.deltaFit - b.deltaFit;
     if (a.creditPerWidth !== b.creditPerWidth) return b.creditPerWidth - a.creditPerWidth;
     if (a.gamma !== b.gamma) return a.gamma - b.gamma;
@@ -64,8 +88,10 @@ export function rankCandidatesDeterministic(candidates: CandidateCard[]): Ranked
       deltaMidpointFit: Number(row.deltaFit.toFixed(6)),
       creditWidth: Number(row.creditPerWidth.toFixed(6)),
       gammaPenalty: Number(row.gamma.toFixed(6)),
+      pop: row.pop ?? undefined,
+      ror: row.ror ?? undefined,
+      evRor: row.evRor ?? undefined,
     },
     candidate: row.candidate,
   }));
 }
-

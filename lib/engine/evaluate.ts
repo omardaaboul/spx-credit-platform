@@ -64,12 +64,17 @@ function preflightStage(input: DecisionInput): {
     if (staleGreeks) warnings.push(reason("GREEKS_STALE", "Greeks feed is stale or missing.", staleDetails));
 
     const shouldBlock =
-      input.strictLiveBlocks &&
+      (input.decisionMode === "PROBABILISTIC" || input.strictLiveBlocks) &&
       input.dataMode === "LIVE" &&
       input.session === "OPEN" &&
       !input.simulationMode;
     if (shouldBlock) {
-      blocks.push(reason("DATA_INCOMPLETE", "Freshness SLA breached in strict live mode.", staleDetails));
+      if (staleSpot) blocks.push(reason("DATA_STALE_SPOT", "Spot feed is stale or missing.", staleDetails));
+      if (staleChain) blocks.push(reason("DATA_STALE_CHAIN", "Option chain feed is stale or missing.", staleDetails));
+      if (staleGreeks) blocks.push(reason("DATA_STALE_GREEKS", "Greeks feed is stale or missing.", staleDetails));
+      if (blocks.length === 0) {
+        blocks.push(reason("DATA_INCOMPLETE", "Freshness SLA breached in strict live mode.", staleDetails));
+      }
     }
   }
 
@@ -233,7 +238,7 @@ function resolveDteBuckets(input: DecisionInput): { stage: DecisionStageResult; 
   const reasons =
     missing.length > 0
       ? [
-          reason("NO_DTE_BUCKET_RESOLUTION", "Missing nearest expiration for one or more target DTE buckets.", {
+          reason("MISSING_EXPIRY_FOR_BUCKET", "Missing nearest expiration for one or more target DTE buckets.", {
             missing_targets: missing.map((row) => row.targetDte),
           }),
         ]
@@ -260,7 +265,7 @@ function regimeStage(input: DecisionInput): { stage: DecisionStageResult; reason
     return {
       stage: {
         stage: "regime_classifier",
-        status: "NO_CANDIDATE",
+        status: input.decisionMode === "PROBABILISTIC" ? "PASS" : "NO_CANDIDATE",
         reasons,
       },
       reasonRows: reasons,
@@ -331,13 +336,48 @@ function strategyCandidateStage(input: DecisionInput): {
   const softWarnings: DecisionReason[] = [];
 
   for (const candidate of candidatePool) {
+    const inProbMode = input.decisionMode === "PROBABILISTIC";
     const dte = parseDteFromStrategy(candidate.strategy);
+    if (dte != null && dte >= 2) {
+      const targetRow = input.multiDteTargets.find(
+        (row) => Number(row.target_dte) === dte || row.strategy_label === candidate.strategy,
+      );
+      const selected = targetRow ? Number(targetRow.selected_dte) : Number.NaN;
+      if (!Number.isFinite(selected) || selected <= 0) {
+        blockedReasons.push(
+          reason("MISSING_EXPIRY_FOR_BUCKET", `Candidate blocked: ${candidate.strategy}`, {
+            candidate_id: candidate.candidateId ?? null,
+            target_dte: dte,
+          }),
+        );
+        continue;
+      }
+    }
     if (dte != null && dte >= 2 && !allowedDteBuckets.includes(dte)) {
+      if (inProbMode) {
+        softWarnings.push(
+          reason("VOL_POLICY_BUCKET_DISABLED", `Volatility policy disabled bucket: ${candidate.strategy}`, {
+            candidate_id: candidate.candidateId ?? null,
+            dte,
+            allowed_buckets: allowedDteBuckets,
+          }),
+        );
+      } else {
+        blockedReasons.push(
+          reason("VOL_POLICY_BUCKET_DISABLED", `Candidate blocked by volatility policy: ${candidate.strategy}`, {
+            candidate_id: candidate.candidateId ?? null,
+            dte,
+            allowed_buckets: allowedDteBuckets,
+          }),
+        );
+        continue;
+      }
+    }
+    if (candidate.hardBlockCode === "INVALID_SPREAD_GEOMETRY") {
       blockedReasons.push(
-        reason("VOL_POLICY_BUCKET_DISABLED", `Candidate blocked by volatility policy: ${candidate.strategy}`, {
+        reason("INVALID_SPREAD_GEOMETRY", `Candidate blocked: ${candidate.strategy}`, {
           candidate_id: candidate.candidateId ?? null,
-          dte,
-          allowed_buckets: allowedDteBuckets,
+          reason: candidate.hardBlockReason ?? "Invalid spread geometry",
         }),
       );
       continue;
@@ -346,16 +386,36 @@ function strategyCandidateStage(input: DecisionInput): {
     const requiredFailed = checklistRows.filter((row) => row.required !== false && (row.status === "fail" || row.status === "blocked"));
     const optionalFailed = checklistRows.filter((row) => row.required === false && (row.status === "fail" || row.status === "blocked"));
 
-    if (candidate.ready && requiredFailed.length === 0) {
+    if (inProbMode) {
       passed.push(candidate);
+      for (const row of requiredFailed) {
+        const name = String(row.name ?? "").toLowerCase();
+        const code =
+          name.includes("delta") ? "DELTA_OUT_OF_BAND" :
+          name.includes("sd") ? "SD_MULTIPLE_LOW" :
+          name.includes("measured move") ? "MMC_GATE_FAIL" :
+          name.includes("support/resistance") ? "SR_BUFFER_THIN" :
+          name.includes("trend") ? "TREND_MISMATCH" :
+          name.includes("credit") ? "LOW_CREDIT_EFFICIENCY" :
+          "HARD_GATES_NOT_MET";
+        softWarnings.push(
+          reason(code, `Soft warning for ${candidate.strategy}: ${row.name}`, {
+            detail: row.detail ?? null,
+          }),
+        );
+      }
     } else {
-      blockedReasons.push(
-        reason(candidateReasonCode(candidate), `Candidate blocked: ${candidate.strategy}`, {
-          candidate_id: candidate.candidateId ?? null,
-          reason: candidate.reason,
-          required_failed: requiredFailed.map((row) => row.name),
-        }),
-      );
+      if (candidate.ready && requiredFailed.length === 0) {
+        passed.push(candidate);
+      } else {
+        blockedReasons.push(
+          reason(candidateReasonCode(candidate), `Candidate blocked: ${candidate.strategy}`, {
+            candidate_id: candidate.candidateId ?? null,
+            reason: candidate.reason,
+            required_failed: requiredFailed.map((row) => row.name),
+          }),
+        );
+      }
     }
 
     for (const row of optionalFailed) {
@@ -450,7 +510,9 @@ export function evaluateDecision(input: DecisionInput): DecisionOutput {
   };
   stages.push(softStage);
 
-  const ranked = rankCandidatesDeterministic(candidatesStage.generated);
+  const ranked = rankCandidatesDeterministic(candidatesStage.generated, input.decisionMode, {
+    applyGammaPenalty: String(process.env.PROB_MAX_GAMMA_PENALTY ?? "true").toLowerCase() !== "false",
+  });
   const rankStage: DecisionStageResult = {
     stage: "deterministic_ranker",
     status: ranked.length > 0 ? "PASS" : "NO_CANDIDATE",
@@ -471,7 +533,7 @@ export function evaluateDecision(input: DecisionInput): DecisionOutput {
   const blocks: DecisionReason[] = [
     ...preflight.blocks,
     ...volStage.blocks,
-    ...dteBuckets.reasonRows.filter((r) => r.code === "NO_DTE_BUCKET_RESOLUTION"),
+    ...dteBuckets.reasonRows.filter((r) => r.code === "MISSING_EXPIRY_FOR_BUCKET"),
     ...regime.reasonRows.filter((r) => r.code === "REGIME_UNCLASSIFIED"),
     ...candidatesStage.blockedReasons,
   ];
@@ -497,6 +559,7 @@ export function evaluateDecision(input: DecisionInput): DecisionOutput {
 
   return {
     status,
+    decisionMode: input.decisionMode,
     blocks,
     warnings,
     vol: volStage.vol,
@@ -509,6 +572,7 @@ export function evaluateDecision(input: DecisionInput): DecisionOutput {
       asOfIso: input.asOfIso,
       source: input.source,
       dataMode: input.dataMode,
+      decisionMode: input.decisionMode,
       freshnessAges: input.freshnessAges,
       freshnessPolicy: input.freshnessPolicy,
       session: input.session,

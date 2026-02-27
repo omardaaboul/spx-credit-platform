@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computePopAndTouch, normalizeIv, normalCdf } from "@/lib/options/probability";
+import { computePopAndTouch, computePopVertical, estimateEvVertical, normalizeIv, normalCdf } from "@/lib/options/probability";
 import type { CreditSpreadInput } from "@/lib/options/payoff";
 
 describe("lib/options/probability", () => {
@@ -58,5 +58,41 @@ describe("lib/options/probability", () => {
     expect(result.probabilityOfTouch).toBeNull();
     expect(result.warning).toBeTruthy();
     expect(result.confidence).toBe("LOW");
+  });
+
+  it("pop rises as breakeven moves farther OTM", () => {
+    const base = {
+      side: "PUT_CREDIT" as const,
+      shortStrike: 100,
+      spot: 105,
+      iv: 0.2,
+      dte: 30,
+    };
+    const near = computePopVertical({ ...base, breakeven: 98 });
+    const far = computePopVertical({ ...base, breakeven: 92 });
+    expect(near.pop).not.toBeNull();
+    expect(far.pop).not.toBeNull();
+    expect(far.pop!).toBeGreaterThan(near.pop!);
+  });
+
+  it("monte carlo EV is deterministic for a given seed", () => {
+    const inputs = {
+      side: "PUT_CREDIT" as const,
+      shortStrike: 100,
+      longStrike: 95,
+      breakeven: 98,
+      width: 5,
+      credit: 1,
+      spot: 105,
+      iv: 0.2,
+      dte: 30,
+      seedKey: "candidate-123",
+      paths: 2000,
+    };
+    const a = estimateEvVertical(inputs);
+    const b = estimateEvVertical(inputs);
+    expect(a.ev).not.toBeNull();
+    expect(b.ev).not.toBeNull();
+    expect(a.ev).toBeCloseTo(b.ev!, 8);
   });
 });

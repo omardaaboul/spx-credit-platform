@@ -467,6 +467,61 @@
   border: 1px solid #e2e8f0;
 }
 
+.alertDiagnostics {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.alertRow {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f8fafc;
+}
+
+.alertMeta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.alertTime {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.alertCode {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 0.68rem;
+  background: #e2e8f0;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.alertMessage {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.alertStats {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
 .label {
   display: block;
   font-size: 0.875rem;

@@ -5,6 +5,7 @@ import {
   computeCurrentPnlFromMark,
   computeMaxLoss,
   computeMaxProfit,
+  computeVerticalPayoff,
   expirationPnl,
   inferWidth,
   type CreditSpreadInput,
@@ -78,5 +79,31 @@ describe("lib/options/payoff", () => {
     };
 
     expect(computeCurrentPnlFromMark(spread, 0.45)).toBeCloseTo(165, 8);
+  });
+
+  it("computes payoff metrics via computeVerticalPayoff", () => {
+    const put = computeVerticalPayoff({
+      side: "PUT_CREDIT",
+      shortStrike: 100,
+      longStrike: 95,
+      credit: 1.5,
+      contracts: 1,
+    });
+    expect(put.valid).toBe(true);
+    expect(put.maxProfit).toBeCloseTo(150, 8);
+    expect(put.maxLoss).toBeCloseTo(350, 8);
+    expect(put.breakeven).toBeCloseTo(98.5, 8);
+
+    const call = computeVerticalPayoff({
+      side: "CALL_CREDIT",
+      shortStrike: 105,
+      longStrike: 110,
+      credit: 1.25,
+      contracts: 2,
+    });
+    expect(call.valid).toBe(true);
+    expect(call.maxProfit).toBeCloseTo(250, 8);
+    expect(call.maxLoss).toBeCloseTo(750, 8);
+    expect(call.breakeven).toBeCloseTo(106.25, 8);
   });
 });

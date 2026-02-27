@@ -12,6 +12,7 @@ function baseInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
     simulationMode: false,
     allowSimAlerts: false,
     strictLiveBlocks: true,
+    decisionMode: "STRICT",
     feature0dte: false,
     freshnessAges: {
       spot: null,

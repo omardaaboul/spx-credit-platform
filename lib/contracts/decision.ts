@@ -6,6 +6,7 @@ import type { VolShockResult } from "@/lib/volatility/volShock";
 export type DataMode = "LIVE" | "DELAYED" | "HISTORICAL" | "FIXTURE";
 export type SessionState = "OPEN" | "CLOSED";
 export type DecisionStatus = "READY" | "BLOCKED" | "NO_CANDIDATE" | "DEGRADED";
+export type DecisionMode = "STRICT" | "PROBABILISTIC";
 
 export type DecisionCode =
   | "MARKET_CLOSED"
@@ -14,18 +15,37 @@ export type DecisionCode =
   | "SPOT_STALE"
   | "CHAIN_STALE"
   | "GREEKS_STALE"
+  | "DATA_STALE_SPOT"
+  | "DATA_STALE_CHAIN"
+  | "DATA_STALE_GREEKS"
   | "DATA_INCOMPLETE"
   | "FEATURE_0DTE_DISABLED"
   | "NO_DTE_BUCKET_RESOLUTION"
+  | "MISSING_EXPIRY_FOR_BUCKET"
   | "REGIME_UNCLASSIFIED"
   | "NO_CREDIT_SPREAD_CANDIDATE"
   | "HARD_GATES_NOT_MET"
+  | "INVALID_SPREAD_GEOMETRY"
   | "CANDIDATE_READY_DEBOUNCED"
   | "ALERT_COOLDOWN_ACTIVE"
   | "ALERT_DAY_CAP_REACHED"
   | "ALERT_DEDUPED"
+  | "ALERTS_DISABLED"
+  | "DATA_MODE_NOT_LIVE"
+  | "POP_TOO_LOW"
+  | "POP_UNAVAILABLE"
+  | "ROR_TOO_LOW"
+  | "CREDIT_PCT_TOO_LOW"
+  | "ALERTS_NO_CANDIDATE"
   | "SOFT_LIQUIDITY_WARNING"
   | "SOFT_SLIPPAGE_WARNING"
+  | "DELTA_OUT_OF_BAND"
+  | "SD_MULTIPLE_LOW"
+  | "MMC_GATE_FAIL"
+  | "SR_BUFFER_THIN"
+  | "TREND_MISMATCH"
+  | "LOW_CREDIT_EFFICIENCY"
+  | "HIGH_GAMMA_RISK"
   | "VOL_REGIME_UNKNOWN"
   | "VOL_CACHE_INSUFFICIENT"
   | "VOL_SHOCK"
@@ -86,6 +106,9 @@ export type RankedCandidate = {
     deltaMidpointFit: number;
     creditWidth: number;
     gammaPenalty: number;
+    pop?: number;
+    ror?: number;
+    evRor?: number;
   };
   candidate: CandidateCard;
 };
@@ -95,6 +118,7 @@ export type DecisionDebug = {
   asOfIso: string;
   source: string;
   dataMode: DataMode;
+  decisionMode: DecisionMode;
   freshnessAges: FreshnessAgesMs;
   freshnessPolicy: FreshnessPolicySec;
   session: SessionState;
@@ -122,6 +146,7 @@ export type DecisionInput = {
   simulationMode: boolean;
   allowSimAlerts: boolean;
   strictLiveBlocks: boolean;
+  decisionMode: DecisionMode;
   feature0dte: boolean;
   freshnessAges: FreshnessAgesMs;
   freshnessPolicy: FreshnessPolicySec;
@@ -153,6 +178,7 @@ export type DecisionInput = {
 
 export type DecisionOutput = {
   status: DecisionStatus;
+  decisionMode: DecisionMode;
   blocks: DecisionReason[];
   warnings: DecisionReason[];
   vol: {
