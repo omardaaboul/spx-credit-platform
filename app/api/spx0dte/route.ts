@@ -5656,7 +5656,7 @@ async function maybeSendNoAlertSummary(payload: DashboardPayload, enabled: boole
     "📌 SPX0DTE DAILY ALERT SUMMARY",
     `Date: ${todayKey} ET`,
     "No alerts were sent today.",
-    reasons.length > 0 ? `Top gates: ${reasons.join(\" | \")}` : "Top gates: n/a",
+    reasons.length > 0 ? `Top gates: ${reasons.join(" | ")}` : "Top gates: n/a",
   ];
   const sent = await sendTelegramMessage(lines.join("\n"));
   if (sent.ok) {
